@@ -6,23 +6,35 @@ import '@testing-library/jest-dom';
 import { vi } from 'vitest';
 
 // Mock Monero WASM
-vi.mock('monero-ts', () => {
+vi.mock('monero-ts', async () => {
+  const actual = await vi.importActual('monero-ts');
   return {
+      ...actual,
       default: {
-          createWalletFull: vi.fn(),
+          ...(actual as any).default,
+          createWalletFull: vi.fn().mockResolvedValue({
+              getAddress: vi.fn().mockResolvedValue('4AdUndXHHZ6cfufTMvppY6JwXNouMBzSkbLYfpAV5Usx3skHNfzQYFYgQp8YwF2Y1nCvZzq6vDWc1vR65wXwscv5Y2CK3y1J2x6qFzT'.padEnd(95, 'A')),
+              getBalance: vi.fn().mockResolvedValue(0),
+              startSyncing: vi.fn(),
+          }),
           MoneroNetworkType: { MAINNET: 'mainnet' }
       },
-      createWalletFull: vi.fn(),
+      createWalletFull: vi.fn().mockResolvedValue({
+          getAddress: vi.fn().mockResolvedValue('4AdUndXHHZ6cfufTMvppY6JwXNouMBzSkbLYfpAV5Usx3skHNfzQYFYgQp8YwF2Y1nCvZzq6vDWc1vR65wXwscv5Y2CK3y1J2x6qFzT'.padEnd(95, 'A')),
+          getBalance: vi.fn().mockResolvedValue(0),
+          startSyncing: vi.fn(),
+      }),
       MoneroNetworkType: { MAINNET: 'mainnet' }
-  }
+  };
 });
 
 // Mock ChainManager to avoid real Ethers/BTC/SOL instantiation during shallow App tests
 // This prevents the "invalid BytesLike" error which comes from Ethers interacting with a potentially mismatched Buffer environment in JSDOM
+// IMPORTANT: We preserve SupportedChain enum so it's available to other modules
 vi.mock('../services/chains/manager', async (importOriginal) => {
     const actual = await importOriginal<typeof import('../services/chains/manager')>();
     return {
-        ...actual,
+        ...actual, // This preserves SupportedChain enum
         ChainManager: class {
             getAllServices() {
                 return [

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { MarketService, type MarketData } from "../services/market";
 import { ChainManager } from "../services/chains/manager";
+import { NetworkService } from "../services/networks";
 import { StorageService } from "../services/storage";
 import { WalletService } from "../services/wallet";
 import {
@@ -24,49 +25,81 @@ export default function Analytics() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let isMounted = true;
+
     const load = async () => {
-      const mnemonic = StorageService.getMnemonic();
-      const privKey = WalletService.getStoredPrivateKey();
+      try {
+        const mnemonic = StorageService.getMnemonic();
+        const privKey = WalletService.getStoredPrivateKey();
 
-      // Support all-in-one wallet: use private key for EVM, mnemonic for non-EVM
-      if (!mnemonic && !privKey) {
-        setLoading(false);
-        return;
-      }
+        // Support all-in-one wallet: use private key for EVM, mnemonic for non-EVM
+        if (!mnemonic && !privKey) {
+          if (isMounted) setLoading(false);
+          return;
+        }
 
-      const manager = new ChainManager(
-        privKey || undefined, // EVM secret (prefer private key)
-        !!privKey, // Is private key
-        mnemonic || undefined // Non-EVM secret (mnemonic)
-      );
-      const services = manager.getAllServices();
+        const enabledNetworks = NetworkService.getEnabledNetworks();
+        const manager = new ChainManager(
+          privKey || undefined, // EVM secret (prefer private key)
+          !!privKey, // Is private key
+          mnemonic || undefined, // Non-EVM secret (mnemonic)
+          enabledNetworks // Network configurations
+        );
+        const services = manager.getAllServices();
 
-      const symbols = services.map(s => s.symbol);
-      const prices = await MarketService.getPrices(symbols);
-      setMarketData(prices);
+        const symbols = services.map(s => s.symbol);
+        
+        // Add timeout for market data fetching
+        const pricesPromise = MarketService.getPrices(symbols);
+        const prices = await Promise.race([
+          pricesPromise,
+          new Promise<Record<string, any>>((_, reject) =>
+            setTimeout(() => reject(new Error("Market data timeout")), 10000)
+          ),
+        ]).catch(() => {
+          // Return empty prices on timeout
+          return {} as Record<string, any>;
+        });
 
-      const newPortfolio = [];
-      for (const service of services) {
-        try {
-          const balStr = await service.getBalance();
-          const bal = parseFloat(balStr);
-          const price = prices[service.symbol]?.current_price || 0;
-          if (bal > 0 && price > 0) {
-            newPortfolio.push({
-              name: service.chainName,
-              symbol: service.symbol,
-              value: bal * price,
-            });
+        if (!isMounted) return;
+        setMarketData(prices);
+
+        const newPortfolio = [];
+        for (const service of services) {
+          try {
+            const balStr = await service.getBalance();
+            const bal = parseFloat(balStr);
+            const price = prices[service.symbol]?.current_price || 0;
+            if (bal > 0 && price > 0) {
+              newPortfolio.push({
+                name: service.chainName,
+                symbol: service.symbol,
+                value: bal * price,
+              });
+            }
+          } catch (e) {
+            console.error(`Failed to load balance for ${service.symbol}:`, e);
           }
-        } catch (e) {
-          console.error(e);
+        }
+
+        if (!isMounted) return;
+        setPortfolio(newPortfolio);
+        setLoading(false);
+      } catch (e) {
+        console.error("Failed to load analytics data:", e);
+        if (isMounted) {
+          setLoading(false);
+          setPortfolio([]);
+          setMarketData({});
         }
       }
-
-      setPortfolio(newPortfolio);
-      setLoading(false);
     };
+    
     load();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const COLORS = ["#00FF9D", "#00C278", "#008552", "#00472C", "#002919"];

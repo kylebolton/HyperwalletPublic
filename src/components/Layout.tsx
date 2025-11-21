@@ -11,10 +11,13 @@ import {
   Wallet as WalletIcon,
   ChevronDown,
   Plus,
+  Loader2,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import clsx from "clsx";
 import { WalletService } from "../services/wallet";
+import { ChainManager } from "../services/chains/manager";
+import { NetworkService } from "../services/networks";
 import type { Wallet } from "../services/storage";
 
 export default function Layout() {
@@ -23,6 +26,7 @@ export default function Layout() {
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [activeWallet, setActiveWallet] = useState<Wallet | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(true);
 
   const navItems = [
     { icon: LayoutDashboard, label: "Portfolio", path: "/" },
@@ -47,6 +51,89 @@ export default function Layout() {
     const interval = setInterval(loadWallets, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Check and initialize wallet sync status
+  useEffect(() => {
+    let isMounted = true;
+    let syncTimeout: NodeJS.Timeout;
+
+    const checkWalletSync = async () => {
+      try {
+        const active = WalletService.getActiveWallet();
+        
+        if (!active) {
+          if (isMounted) setIsSyncing(false);
+          return;
+        }
+
+        const mnemonic = active.mnemonic;
+        const privKey = active.privateKey;
+
+        if (!mnemonic && !privKey) {
+          if (isMounted) setIsSyncing(false);
+          return;
+        }
+
+        // Set syncing to true while we check
+        if (isMounted) setIsSyncing(true);
+
+        // Get enabled network configs
+        const enabledNetworks = NetworkService.getEnabledNetworks();
+
+        // Create manager with both secrets if available
+        const manager = new ChainManager(
+          privKey || undefined,
+          !!privKey,
+          mnemonic || undefined,
+          enabledNetworks
+        );
+        const services = manager.getAllServices();
+
+        // Initialize services that need it
+        const initPromises = services.map(async service => {
+          try {
+            if ('init' in service && typeof service.init === 'function') {
+              await service.init();
+            }
+            // Try to get address to verify it's working
+            await service.getAddress();
+            return true;
+          } catch (e) {
+            console.warn(`${service.symbol}: Initialization/sync check failed:`, e);
+            return false;
+          }
+        });
+
+        // Wait for all initializations with timeout
+        await Promise.race([
+          Promise.all(initPromises),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("Sync timeout")), 15000)
+          ),
+        ]);
+
+        // All wallets synced
+        if (isMounted) setIsSyncing(false);
+      } catch (e) {
+        console.warn("Wallet sync check failed:", e);
+        // On error, still mark as synced after a delay (to show we tried)
+        syncTimeout = setTimeout(() => {
+          if (isMounted) setIsSyncing(false);
+        }, 2000);
+      }
+    };
+
+    checkWalletSync();
+
+    // Re-check periodically
+    const syncInterval = setInterval(checkWalletSync, 5000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(syncInterval);
+      if (syncTimeout) clearTimeout(syncTimeout);
+    };
+  }, [activeWallet?.id]);
 
   const handleSwitchWallet = (walletId: string) => {
     WalletService.switchWallet(walletId);
@@ -144,7 +231,7 @@ export default function Layout() {
             )}
           </div>
 
-          <nav className="space-y-3">
+          <nav className="space-y-4">
             {navItems.map(item => (
               <Link key={item.path} to={item.path}>
                 <div
@@ -173,13 +260,28 @@ export default function Layout() {
 
         <div className="p-4 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-primary)] transition-colors">
           <div className="flex items-center gap-3 mb-2">
-            <ShieldCheck size={16} className="text-green-500" />
-            <span className="text-xs font-bold text-[var(--text-secondary)]">
-              STATUS: SECURE
-            </span>
+            {isSyncing ? (
+              <>
+                <Loader2 size={16} className="text-yellow-500 animate-spin" />
+                <span className="text-xs font-bold text-yellow-500">
+                  STATUS: CONNECTING
+                </span>
+              </>
+            ) : (
+              <>
+                <ShieldCheck size={16} className="text-green-500" />
+                <span className="text-xs font-bold text-[var(--text-secondary)]">
+                  STATUS: SECURE
+                </span>
+              </>
+            )}
           </div>
           <div className="w-full bg-[var(--bg-tertiary)] h-1.5 rounded-full overflow-hidden">
-            <div className="bg-green-500 h-full w-full animate-pulse"></div>
+            {isSyncing ? (
+              <div className="bg-yellow-500 h-full w-full animate-pulse"></div>
+            ) : (
+              <div className="bg-green-500 h-full w-full animate-pulse"></div>
+            )}
           </div>
         </div>
       </motion.div>

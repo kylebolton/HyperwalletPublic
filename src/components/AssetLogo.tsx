@@ -14,6 +14,17 @@ const assetColors: Record<string, string> = {
   ZEC: "#F4B728",
   HYPE: "#00FF9D",
   HYPEREVM: "#00FF9D",
+  // Common HyperEVM tokens
+  USDT: "#26a17b",
+  USDC: "#2775ca",
+  DAI: "#f5ac37",
+  WBTC: "#f7931a",
+  WETH: "#627eea",
+  UNI: "#ff007a",
+  LINK: "#2e5cea",
+  AAVE: "#b6509e",
+  wHYPE: "#00FF9D",
+  WHYPE: "#00FF9D",
 };
 
 export default function AssetLogo({

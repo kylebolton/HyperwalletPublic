@@ -12,7 +12,11 @@
     "electron:dev": "wait-on tcp:5173 && cross-env NODE_ENV=development electron .",
     "build": "tsc -p tsconfig.electron.json && mv dist-electron/main.js dist-electron/main.cjs && mv dist-electron/preload.js dist-electron/preload.cjs && vite build && electron-builder",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest --coverage",
+    "test:run": "vitest run"
   },
   "build": {
     "appId": "com.hyperwallet.app",

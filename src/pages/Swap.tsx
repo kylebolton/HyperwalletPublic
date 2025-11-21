@@ -5,6 +5,7 @@ import {
   type ShieldSwapQuote,
 } from "../services/zcash-shield";
 import { ChainManager, SupportedChain } from "../services/chains/manager";
+import { NetworkService } from "../services/networks";
 import { WalletService } from "../services/wallet";
 import { motion } from "framer-motion";
 import { ArrowRightLeft, Shield, Wallet } from "lucide-react";
@@ -25,6 +26,7 @@ export default function Swap() {
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [addressError, setAddressError] = useState<string | null>(null);
   const [loadingWalletAddress, setLoadingWalletAddress] = useState(false);
+  const [walletInitStatus, setWalletInitStatus] = useState<string | null>(null);
 
   // Check if ZCash is involved (for Shield Swap branding)
   const isZCashSwap =
@@ -154,18 +156,41 @@ export default function Swap() {
           return;
         }
 
+        const enabledNetworks = NetworkService.getEnabledNetworks();
         const manager = new ChainManager(
           privKey || undefined,
           !!privKey,
-          mnemonic || undefined
+          mnemonic || undefined,
+          enabledNetworks
         );
 
         const service = manager.getService(chainKey);
+        
+        // Check if service has init method and initialize if needed
+        if ('init' in service && typeof service.init === 'function') {
+          setWalletInitStatus(`Initializing ${to} wallet...`);
+          try {
+            await service.init();
+            setWalletInitStatus(`${to} wallet initialized successfully!`);
+            // Small delay to show success message
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          } catch (initError: any) {
+            console.error("Failed to initialize wallet:", initError);
+            setWalletInitStatus(`Initialization failed: ${initError.message || 'Unknown error'}`);
+            setWalletAddress(null);
+            setLoadingWalletAddress(false);
+            return;
+          }
+        }
+        
+        setWalletInitStatus("Getting address...");
         const address = await service.getAddress();
         setWalletAddress(address);
+        setWalletInitStatus(null); // Clear status once address is loaded
       } catch (e: any) {
         console.error("Failed to fetch wallet address:", e);
         setWalletAddress(null);
+        setWalletInitStatus(null);
       } finally {
         setLoadingWalletAddress(false);
       }
@@ -205,10 +230,12 @@ export default function Swap() {
           return;
         }
 
+        const enabledNetworks = NetworkService.getEnabledNetworks();
         const manager = new ChainManager(
           privKey || undefined,
           !!privKey,
-          mnemonic || undefined
+          mnemonic || undefined,
+          enabledNetworks
         );
 
         const service = manager.getService(chainKey);
@@ -237,21 +264,23 @@ export default function Swap() {
     to.toUpperCase() === "HYPE";
 
   return (
-    <div className="max-w-2xl mx-auto space-y-8">
+    <div className="space-y-8">
       <div className="flex items-center justify-between">
-        <h1 className="text-4xl font-bold tracking-tighter flex items-center gap-3">
-          {isZCashSwap ? (
-            <>
-              <Shield className="text-hyper-green" size={32} />
-              Shield Swap
-            </>
-          ) : (
-            <>
-              <ArrowRightLeft className="text-hyper-green" size={32} />
-              Swap
-            </>
-          )}
-        </h1>
+        <div>
+          <h1 className="text-4xl font-bold tracking-tighter flex items-center gap-3">
+            {isZCashSwap ? (
+              <>
+                <Shield className="text-hyper-green" size={32} />
+                Shield Swap
+              </>
+            ) : (
+              <>
+                <ArrowRightLeft className="text-hyper-green" size={32} />
+                Swap
+              </>
+            )}
+          </h1>
+        </div>
         {swapProvider && (
           <div
             className={`px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 ${
@@ -273,30 +302,33 @@ export default function Swap() {
       </div>
 
       <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="bg-[var(--bg-secondary)] border border-[var(--border-primary)] p-8 rounded-3xl shadow-sm transition-colors"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-[var(--bg-secondary)] border border-[var(--border-primary)] p-8 rounded-3xl transition-colors"
       >
-        <div className="space-y-8">
-          <div className="space-y-2">
-            <label className="text-sm font-bold text-[var(--text-secondary)]">
-              FROM
+        <div className="space-y-6">
+          {/* From Section */}
+          <div className="space-y-3">
+            <label className="text-sm font-bold text-[var(--text-secondary)] uppercase tracking-wide">
+              From
             </label>
-            <div className="flex gap-4">
-              <input
-                type="number"
-                value={amount}
-                onChange={e => setAmount(e.target.value)}
-                className="flex-1 text-3xl font-bold outline-none placeholder-[var(--text-tertiary)] text-[var(--text-primary)] bg-transparent transition-colors"
-                placeholder="0.00"
-              />
+            <div className="flex gap-3 items-center">
+              <div className="flex-1">
+                <input
+                  type="number"
+                  value={amount}
+                  onChange={e => setAmount(e.target.value)}
+                  className="w-full text-4xl font-bold outline-none placeholder-[var(--text-tertiary)] text-[var(--text-primary)] bg-transparent transition-colors"
+                  placeholder="0.00"
+                />
+              </div>
               <select
                 value={from}
                 onChange={e => {
                   setFrom(e.target.value);
                   setQuote(null);
                 }}
-                className="bg-[var(--bg-tertiary)] rounded-xl px-4 font-bold text-[var(--text-primary)] border border-[var(--border-primary)] transition-colors"
+                className="bg-[var(--bg-tertiary)] rounded-2xl px-6 py-4 font-bold text-[var(--text-primary)] border border-[var(--border-primary)] transition-colors cursor-pointer hover:bg-[var(--hover-bg)] min-w-[140px]"
               >
                 {currencies.map(c => (
                   <option key={c} value={c}>
@@ -307,22 +339,43 @@ export default function Swap() {
             </div>
           </div>
 
-          <div className="flex justify-center">
-            <div className="bg-[var(--bg-tertiary)] p-3 rounded-full hover:bg-[var(--hover-bg)] cursor-pointer transition-colors">
+          {/* Swap Arrow */}
+          <div className="flex justify-center -my-2">
+            <button
+              onClick={() => {
+                const temp = from;
+                setFrom(to);
+                setTo(temp);
+                setQuote(null);
+                setShieldQuote(null);
+              }}
+              className="bg-[var(--bg-tertiary)] p-4 rounded-full hover:bg-[var(--hover-bg)] transition-colors border border-[var(--border-primary)] hover:border-hyper-green group"
+            >
               <ArrowRightLeft
-                size={20}
-                className="text-[var(--text-secondary)]"
+                size={24}
+                className="text-[var(--text-secondary)] group-hover:text-hyper-green transition-colors"
               />
-            </div>
+            </button>
           </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-bold text-[var(--text-secondary)]">
-              TO (ESTIMATED)
+          {/* To Section */}
+          <div className="space-y-3">
+            <label className="text-sm font-bold text-[var(--text-secondary)] uppercase tracking-wide">
+              To {quote && "(Estimated)"}
             </label>
-            <div className="flex gap-4">
-              <div className="flex-1 text-3xl font-bold text-[var(--text-primary)]">
-                {quote ? quote.amountOut : "0.00"}
+            <div className="flex gap-3 items-center">
+              <div className="flex-1">
+                <div className="text-4xl font-bold text-[var(--text-primary)] min-h-[3rem] flex items-center">
+                  {loading ? (
+                    <div className="h-12 w-32 bg-[var(--bg-tertiary)] rounded animate-pulse"></div>
+                  ) : quote ? (
+                    quote.amountOut
+                  ) : shieldQuote ? (
+                    shieldQuote.amount
+                  ) : (
+                    "0.00"
+                  )}
+                </div>
               </div>
               <select
                 value={to}
@@ -333,8 +386,9 @@ export default function Swap() {
                   setUseCustomDestination(false);
                   setDestinationAddress("");
                   setAddressError(null);
+                  setWalletInitStatus(null);
                 }}
-                className="bg-[var(--bg-tertiary)] rounded-xl px-4 font-bold text-[var(--text-primary)] border border-[var(--border-primary)] transition-colors"
+                className="bg-[var(--bg-tertiary)] rounded-2xl px-6 py-4 font-bold text-[var(--text-primary)] border border-[var(--border-primary)] transition-colors cursor-pointer hover:bg-[var(--hover-bg)] min-w-[140px]"
               >
                 {currencies.map(c => (
                   <option key={c} value={c}>
@@ -358,10 +412,10 @@ export default function Swap() {
                     setDestinationAddress("");
                     setAddressError(null);
                   }}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-colors ${
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors ${
                     useCustomDestination
                       ? "bg-[var(--text-primary)] text-[var(--bg-primary)]"
-                      : "bg-[var(--bg-secondary)] text-[var(--text-primary)]"
+                      : "bg-[var(--bg-secondary)] text-[var(--text-primary)] border border-[var(--border-primary)]"
                   }`}
                 >
                   {useCustomDestination ? "Custom" : "My Wallet"}
@@ -379,8 +433,32 @@ export default function Swap() {
                       Your {to} Wallet Address
                     </span>
                   </div>
-                  {loadingWalletAddress ? (
-                    <div className="text-sm text-[var(--text-secondary)] font-mono">
+                  {walletInitStatus ? (
+                    <div className="space-y-2">
+                      {walletInitStatus.includes("Initializing") || walletInitStatus.includes("Getting address") ? (
+                        <div className="text-sm text-[var(--text-primary)] font-medium flex items-center gap-2">
+                          <div className="w-4 h-4 border-2 border-hyper-green border-t-transparent rounded-full animate-spin"></div>
+                          {walletInitStatus}
+                        </div>
+                      ) : walletInitStatus.includes("initialized successfully") ? (
+                        <div className="text-sm text-green-600 dark:text-green-400 font-medium flex items-center gap-2">
+                          <span>✓</span>
+                          {walletInitStatus}
+                        </div>
+                      ) : walletInitStatus.includes("Initialization failed") ? (
+                        <div className="text-sm text-red-600 dark:text-red-400 font-medium">
+                          {walletInitStatus}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-[var(--text-secondary)] font-mono flex items-center gap-2">
+                          <div className="w-4 h-4 border-2 border-[var(--text-secondary)] border-t-transparent rounded-full animate-spin"></div>
+                          {walletInitStatus}
+                        </div>
+                      )}
+                    </div>
+                  ) : loadingWalletAddress ? (
+                    <div className="text-sm text-[var(--text-secondary)] font-mono flex items-center gap-2">
+                      <div className="w-4 h-4 border-2 border-[var(--text-secondary)] border-t-transparent rounded-full animate-spin"></div>
                       Loading address...
                     </div>
                   ) : walletAddress ? (
@@ -405,18 +483,18 @@ export default function Swap() {
                     placeholder={`Enter ${to} address`}
                     className={`w-full p-4 bg-[var(--bg-secondary)] text-[var(--text-primary)] rounded-xl border font-mono text-sm outline-none transition-all ${
                       addressError
-                        ? "border-red-300 focus:ring-2 focus:ring-red-200"
-                        : "border-[var(--border-primary)] focus:ring-2 focus:ring-hyper-green"
+                        ? "border-red-500 focus:ring-2 focus:ring-red-500/20"
+                        : "border-[var(--border-primary)] focus:ring-2 focus:ring-hyper-green/20 focus:border-hyper-green"
                     }`}
                   />
                   {addressError && (
-                    <p className="text-xs text-red-500 font-medium">
-                      {addressError}
+                    <p className="text-xs text-red-500 font-medium flex items-center gap-1">
+                      <span>⚠</span> {addressError}
                     </p>
                   )}
                   {!addressError && destinationAddress && (
-                    <p className="text-xs text-green-600 dark:text-green-400 font-medium transition-colors">
-                      ✓ Valid {to} address
+                    <p className="text-xs text-green-500 dark:text-green-400 font-medium transition-colors flex items-center gap-1">
+                      <span>✓</span> Valid {to} address
                     </p>
                   )}
                 </div>
@@ -425,21 +503,25 @@ export default function Swap() {
           )}
 
           {quote && (
-            <div className="p-6 bg-[var(--bg-tertiary)] rounded-2xl text-sm space-y-3 text-[var(--text-primary)] border border-[var(--border-primary)] transition-colors">
-              <div className="flex items-center justify-between pb-3 border-b border-[var(--border-primary)]">
-                <span className="text-[var(--text-secondary)] font-medium">
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="p-6 bg-[var(--bg-tertiary)] rounded-2xl space-y-4 text-[var(--text-primary)] border border-[var(--border-primary)] transition-colors"
+            >
+              <div className="flex items-center justify-between pb-4 border-b border-[var(--border-primary)]">
+                <span className="text-sm font-bold text-[var(--text-secondary)] uppercase tracking-wide">
                   Exchange Rate
                 </span>
-                <span className="font-bold text-lg">
+                <span className="font-bold text-xl">
                   1 {from} ≈ {parseFloat(quote.rate).toFixed(6)} {to}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-[var(--text-secondary)] font-medium">
+                <span className="text-sm font-bold text-[var(--text-secondary)] uppercase tracking-wide">
                   Swap Provider
                 </span>
                 <div
-                  className={`px-3 py-1 rounded-lg font-bold text-xs flex items-center gap-2 ${
+                  className={`px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 ${
                     quote.provider === "hyperswap"
                       ? "bg-hyper-green text-black"
                       : "bg-blue-500 text-white"
@@ -447,7 +529,7 @@ export default function Swap() {
                 >
                   {quote.provider === "hyperswap" ? (
                     <>
-                      <Shield size={14} />
+                      <Shield size={16} />
                       HyperEVM
                     </>
                   ) : (
@@ -456,34 +538,34 @@ export default function Swap() {
                 </div>
               </div>
               {quote.provider === "hyperswap" && quote.builderFee && (
-                <div className="flex justify-between items-center">
-                  <span className="text-[var(--text-secondary)] font-medium">
+                <div className="flex justify-between items-center py-2">
+                  <span className="text-sm font-bold text-[var(--text-secondary)]">
                     Builder Fee (1%)
                   </span>
-                  <span className="font-bold">
+                  <span className="font-bold text-lg">
                     {quote.builderFee} {to}
                   </span>
                 </div>
               )}
               {quote.provider === "swapzone" && quote.fee && (
-                <div className="flex justify-between items-center">
-                  <span className="text-[var(--text-secondary)] font-medium">
+                <div className="flex justify-between items-center py-2">
+                  <span className="text-sm font-bold text-[var(--text-secondary)]">
                     Platform Fee (1%)
                   </span>
-                  <span className="font-bold">{quote.fee}</span>
+                  <span className="font-bold text-lg">{quote.fee}</span>
                 </div>
               )}
-              <div className="pt-3 border-t border-[var(--border-primary)]">
+              <div className="pt-4 border-t border-[var(--border-primary)]">
                 <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
                   {quote.provider === "hyperswap"
                     ? "Builder fee is deducted from your swap output. Swaps are executed directly on HyperEVM."
                     : "Platform fee is deducted from your swap output. Swaps are processed via SwapZone."}
                 </p>
               </div>
-            </div>
+            </motion.div>
           )}
 
-          <div className="pt-4 space-y-3">
+          <div className="pt-4 space-y-4">
             <button
               onClick={quote || shieldQuote ? handleSwap : handleGetQuote}
               disabled={
@@ -495,15 +577,26 @@ export default function Swap() {
                     : !walletAddress
                   : false)
               }
-              className="w-full py-5 bg-hyper-green text-black rounded-2xl font-bold text-xl hover:bg-hyper-dark transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl"
+              className="w-full py-5 bg-hyper-green text-black rounded-2xl font-bold text-lg hover:bg-hyper-dark transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 group"
             >
-              {loading
-                ? "Processing..."
-                : quote || shieldQuote
-                ? "Confirm Swap"
-                : "Get Quote"}
+              {loading ? (
+                <>
+                  <div className="w-5 h-5 border-2 border-black border-t-transparent rounded-full animate-spin"></div>
+                  Processing...
+                </>
+              ) : quote || shieldQuote ? (
+                <>
+                  Confirm Swap
+                  <ArrowRightLeft size={20} className="group-hover:translate-x-1 transition-transform" />
+                </>
+              ) : (
+                <>
+                  Get Quote
+                  <ArrowRightLeft size={20} />
+                </>
+              )}
             </button>
-            {!quote && !isZCashSwap && (
+            {!quote && !isZCashSwap && !loading && (
               <p className="text-xs text-center text-[var(--text-secondary)]">
                 {isHyperEVMSwap
                   ? "HyperEVM swaps use HyperSwap for direct on-chain execution"
@@ -511,40 +604,44 @@ export default function Swap() {
               </p>
             )}
             {isZCashSwap && !quote && !shieldQuote && (
-              <div className="space-y-3">
-                <div className="p-4 bg-blue-50 dark:bg-blue-950 rounded-xl border border-blue-200 dark:border-blue-800 transition-colors">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-sm font-bold text-blue-900 dark:text-blue-400">
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="space-y-3"
+              >
+                <div className="p-6 bg-blue-50 dark:bg-blue-950 rounded-2xl border border-blue-200 dark:border-blue-800 transition-colors">
+                  <div className="flex items-center justify-between mb-4">
+                    <span className="text-sm font-bold text-blue-900 dark:text-blue-400 uppercase tracking-wide">
                       Shield Swap Mode
                     </span>
                     <Shield
-                      size={18}
+                      size={20}
                       className="text-blue-600 dark:text-blue-400"
                     />
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-3">
                     <button
                       onClick={() => setShieldMode("transparent")}
-                      className={`flex-1 py-2 px-3 rounded-lg text-sm font-bold transition-colors ${
+                      className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold transition-colors ${
                         shieldMode === "transparent"
-                          ? "bg-blue-600 text-white"
-                          : "bg-[var(--bg-primary)] text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800"
+                          ? "bg-blue-600 text-white shadow-lg"
+                          : "bg-[var(--bg-primary)] text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900"
                       }`}
                     >
                       T → Z (Shield)
                     </button>
                     <button
                       onClick={() => setShieldMode("shielded")}
-                      className={`flex-1 py-2 px-3 rounded-lg text-sm font-bold transition-colors ${
+                      className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold transition-colors ${
                         shieldMode === "shielded"
-                          ? "bg-blue-600 text-white"
-                          : "bg-[var(--bg-primary)] text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800"
+                          ? "bg-blue-600 text-white shadow-lg"
+                          : "bg-[var(--bg-primary)] text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900"
                       }`}
                     >
                       Z → T (Unshield)
                     </button>
                   </div>
-                  <p className="text-xs text-blue-700 dark:text-blue-400 mt-2">
+                  <p className="text-xs text-blue-700 dark:text-blue-400 mt-3 leading-relaxed">
                     {shieldMode === "transparent"
                       ? "Convert transparent (t-address) to shielded (z-address) for privacy"
                       : "Convert shielded (z-address) to transparent (t-address)"}
@@ -554,32 +651,30 @@ export default function Swap() {
                   Shield Swap enables private ZCash transactions between
                   transparent and shielded addresses
                 </p>
-              </div>
+              </motion.div>
             )}
             {shieldQuote && (
-              <div className="p-6 bg-blue-50 dark:bg-blue-950 rounded-2xl text-sm space-y-3 text-[var(--text-primary)] border border-blue-200 dark:border-blue-800 transition-colors">
-                <div className="flex items-center justify-between pb-3 border-b border-blue-300 dark:border-blue-700">
-                  <span className="text-blue-900 dark:text-blue-400 font-medium">
-                    Shield Swap
-                  </span>
-                  <div className="px-3 py-1 bg-blue-600 text-white rounded-lg font-bold text-xs flex items-center gap-2">
-                    <Shield size={14} />
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-6 bg-blue-50 dark:bg-blue-950 rounded-2xl space-y-4 text-[var(--text-primary)] border border-blue-200 dark:border-blue-800 transition-colors"
+              >
+                <div className="flex items-center justify-between pb-4 border-b border-blue-300 dark:border-blue-700">
+                  <span className="text-sm font-bold text-blue-900 dark:text-blue-400 uppercase tracking-wide">Shield Swap</span>
+                  <div className="px-4 py-2 bg-blue-600 text-white rounded-xl font-bold text-sm flex items-center gap-2">
+                    <Shield size={16} />
                     {shieldQuote.fromType === "transparent" ? "T → Z" : "Z → T"}
                   </div>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-blue-800 dark:text-blue-400 font-medium">
-                    Amount
-                  </span>
-                  <span className="font-bold">{shieldQuote.amount} ZEC</span>
+                <div className="flex items-center justify-between py-2">
+                  <span className="text-sm font-bold text-blue-800 dark:text-blue-400">Amount</span>
+                  <span className="font-bold text-lg">{shieldQuote.amount} ZEC</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-blue-800 dark:text-blue-400 font-medium">
-                    Shield Fee
-                  </span>
-                  <span className="font-bold">{shieldQuote.fee} ZEC</span>
+                <div className="flex items-center justify-between py-2">
+                  <span className="text-sm font-bold text-blue-800 dark:text-blue-400">Shield Fee</span>
+                  <span className="font-bold text-lg">{shieldQuote.fee} ZEC</span>
                 </div>
-                <div className="pt-3 border-t border-blue-300 dark:border-blue-700">
+                <div className="pt-4 border-t border-blue-300 dark:border-blue-700">
                   <p className="text-xs text-blue-700 dark:text-blue-400 leading-relaxed">
                     Shield swap fee (0.1%) enables private transaction
                     conversion. Your funds will be{" "}
@@ -589,15 +684,19 @@ export default function Swap() {
                     .
                   </p>
                 </div>
-              </div>
+              </motion.div>
             )}
           </div>
 
           {swapStatus && (
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="p-4 bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 rounded-xl text-center font-medium transition-colors"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={`p-4 rounded-xl text-center font-medium transition-colors ${
+                swapStatus.includes("error") || swapStatus.includes("Error")
+                  ? "bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-400"
+                  : "bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400"
+              }`}
             >
               {swapStatus}
             </motion.div>

@@ -2,6 +2,7 @@ import { useState } from "react";
 import Modal from "./Modal";
 import { Send } from "lucide-react";
 import { ChainManager } from "../services/chains/manager";
+import { NetworkService } from "../services/networks";
 import { StorageService } from "../services/storage";
 import { WalletService } from "../services/wallet";
 import { SupportedChain } from "../services/chains/manager";
@@ -36,10 +37,12 @@ export default function SendModal({
 
       if (!mnemonic && !privKey) throw new Error("No wallet found");
 
+      const enabledNetworks = NetworkService.getEnabledNetworks();
       const manager = new ChainManager(
         privKey || undefined, // EVM secret (prefer private key)
         !!privKey, // Is private key
-        mnemonic || undefined // Non-EVM secret (mnemonic)
+        mnemonic || undefined, // Non-EVM secret (mnemonic)
+        enabledNetworks // Network configurations
       );
       const service = manager.getService(chainKey as SupportedChain);
 

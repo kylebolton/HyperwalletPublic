@@ -58,7 +58,6 @@ export default function Import() {
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="max-w-2xl"
       >
         <div className="bg-[var(--bg-secondary)] p-8 rounded-3xl border border-[var(--border-primary)] space-y-6 transition-colors">
           <div className="flex p-1 bg-[var(--bg-tertiary)] rounded-xl">

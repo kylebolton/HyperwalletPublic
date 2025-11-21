@@ -15,8 +15,11 @@ import {
 } from "lucide-react";
 import { StorageService } from "../services/storage";
 import { WalletService } from "../services/wallet";
+import { NetworkService, type NetworkConfig } from "../services/networks";
+import { SupportedChain } from "../services/chains/manager";
 import { useTheme } from "../contexts/ThemeContext";
 import type { Wallet as WalletType } from "../services/storage";
+import Modal from "../components/Modal";
 
 interface Contact {
   id: number;
@@ -43,6 +46,12 @@ export default function Settings() {
   const [activeWallet, setActiveWallet] = useState<WalletType | null>(null);
   const [editingWalletId, setEditingWalletId] = useState<string | null>(null);
   const [editName, setEditName] = useState<string>("");
+  const [networkConfigs, setNetworkConfigs] = useState<NetworkConfig[]>([]);
+  const [editingNetwork, setEditingNetwork] = useState<NetworkConfig | null>(null);
+  const [editNetworkName, setEditNetworkName] = useState<string>("");
+  const [editNetworkRpcUrl, setEditNetworkRpcUrl] = useState<string>("");
+  const [editNetworkChainId, setEditNetworkChainId] = useState<number>(1);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   useEffect(() => {
     const loadedContacts = StorageService.get("contacts") || [];
@@ -55,6 +64,10 @@ export default function Settings() {
     const active = WalletService.getActiveWallet();
     setMyWallets(wallets);
     setActiveWallet(active);
+
+    // Load network configs
+    const configs = NetworkService.getNetworkConfigs();
+    setNetworkConfigs(configs);
   }, []);
 
   const addContact = () => {
@@ -102,6 +115,51 @@ export default function Settings() {
       .catch(err => {
         console.error("Failed to copy:", err);
       });
+  };
+
+  const handleToggleNetwork = (chain: SupportedChain, enabled: boolean) => {
+    const updated = networkConfigs.map(config =>
+      config.chain === chain ? { ...config, enabled } : config
+    );
+    setNetworkConfigs(updated);
+  };
+
+  const handleEditNetwork = (config: NetworkConfig) => {
+    setEditingNetwork(config);
+    setEditNetworkName(config.name);
+    setEditNetworkRpcUrl(config.rpcUrl || "");
+    setEditNetworkChainId(config.chainId || 1);
+  };
+
+  const handleSaveNetworkEdit = () => {
+    if (!editingNetwork) return;
+
+    const updated = networkConfigs.map(config =>
+      config.chain === editingNetwork.chain
+        ? {
+            ...config,
+            name: editNetworkName,
+            rpcUrl: editNetworkRpcUrl || undefined,
+            chainId: editNetworkChainId,
+            custom: true,
+          }
+        : config
+    );
+    setNetworkConfigs(updated);
+    setEditingNetwork(null);
+  };
+
+  const handleSaveNetworks = () => {
+    NetworkService.saveNetworkConfigs(networkConfigs);
+    setSaveSuccess(true);
+    setTimeout(() => {
+      setSaveSuccess(false);
+      window.location.reload(); // Reload to apply changes
+    }, 1500);
+  };
+
+  const isEVMChain = (chain: SupportedChain): boolean => {
+    return chain === SupportedChain.HYPEREVM || chain === SupportedChain.ETH;
   };
 
   return (
@@ -507,6 +565,87 @@ export default function Settings() {
             <div className="p-6 bg-[var(--bg-secondary)] rounded-2xl border border-[var(--border-primary)] transition-colors">
               <div className="flex items-center justify-between mb-4">
                 <div>
+                  <h3 className="font-bold text-lg mb-1">Network Settings</h3>
+                  <p className="text-sm text-[var(--text-secondary)]">
+                    Enable or disable networks and configure their settings
+                  </p>
+                </div>
+                <button
+                  onClick={handleSaveNetworks}
+                  className="px-4 py-2 bg-hyper-green text-black rounded-xl font-bold text-sm hover:bg-hyper-dark transition-colors"
+                >
+                  Save Changes
+                </button>
+              </div>
+
+              {saveSuccess && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mb-4 p-3 bg-green-50 dark:bg-green-950 rounded-xl border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400 text-sm font-bold transition-colors"
+                >
+                  <CheckCircle2 size={16} className="inline mr-2" />
+                  Network settings saved! Reloading...
+                </motion.div>
+              )}
+
+              <div className="space-y-3">
+                {networkConfigs.map(config => (
+                  <div
+                    key={config.chain}
+                    className="p-4 bg-[var(--bg-tertiary)] rounded-xl border border-[var(--border-primary)] transition-colors"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3">
+                          <div className="font-bold text-lg">{config.name}</div>
+                          <span className="text-xs font-bold bg-[var(--bg-secondary)] px-2 py-1 rounded-md">
+                            {config.symbol}
+                          </span>
+                          {config.custom && (
+                            <span className="text-xs font-bold text-hyper-green">
+                              Custom
+                            </span>
+                          )}
+                        </div>
+                        {isEVMChain(config.chain) && (
+                          <div className="mt-2 text-xs text-[var(--text-secondary)] space-y-1">
+                            <div>RPC: {config.rpcUrl || "Not set"}</div>
+                            <div>Chain ID: {config.chainId || "Not set"}</div>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {isEVMChain(config.chain) && (
+                          <button
+                            onClick={() => handleEditNetwork(config)}
+                            className="p-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+                            title="Edit network"
+                          >
+                            <Edit2 size={18} />
+                          </button>
+                        )}
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="sr-only peer"
+                            checked={config.enabled}
+                            onChange={e =>
+                              handleToggleNetwork(config.chain, e.target.checked)
+                            }
+                          />
+                          <div className="w-14 h-7 bg-[var(--bg-secondary)] peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-hyper-green/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[4px] after:bg-[var(--bg-primary)] after:border-[var(--border-primary)] after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-hyper-green peer-checked:border-2 peer-checked:border-[var(--text-primary)] transition-colors"></div>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="p-6 bg-[var(--bg-secondary)] rounded-2xl border border-[var(--border-primary)] transition-colors">
+              <div className="flex items-center justify-between mb-4">
+                <div>
                   <h3 className="font-bold text-lg mb-1">Testing Mode</h3>
                   <p className="text-sm text-[var(--text-secondary)]">
                     Enable testing mode for development and contract testing
@@ -534,6 +673,75 @@ export default function Settings() {
           </div>
         </motion.div>
       )}
+
+      {/* Network Edit Modal */}
+      <Modal
+        isOpen={editingNetwork !== null}
+        onClose={() => setEditingNetwork(null)}
+        title={`Edit ${editingNetwork?.name} Network`}
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-bold text-[var(--text-secondary)] mb-2">
+              Network Name
+            </label>
+            <input
+              type="text"
+              value={editNetworkName}
+              onChange={e => setEditNetworkName(e.target.value)}
+              className="w-full p-3 bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-xl border border-[var(--border-primary)] outline-none focus:ring-2 focus:ring-hyper-green transition-all"
+              placeholder="Network name"
+            />
+          </div>
+
+          {editingNetwork && isEVMChain(editingNetwork.chain) && (
+            <>
+              <div>
+                <label className="block text-sm font-bold text-[var(--text-secondary)] mb-2">
+                  RPC URL
+                </label>
+                <input
+                  type="text"
+                  value={editNetworkRpcUrl}
+                  onChange={e => setEditNetworkRpcUrl(e.target.value)}
+                  className="w-full p-3 bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-xl border border-[var(--border-primary)] outline-none focus:ring-2 focus:ring-hyper-green transition-all font-mono text-sm"
+                  placeholder="https://..."
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-[var(--text-secondary)] mb-2">
+                  Chain ID
+                </label>
+                <input
+                  type="number"
+                  value={editNetworkChainId}
+                  onChange={e =>
+                    setEditNetworkChainId(parseInt(e.target.value) || 1)
+                  }
+                  className="w-full p-3 bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-xl border border-[var(--border-primary)] outline-none focus:ring-2 focus:ring-hyper-green transition-all"
+                  placeholder="1"
+                />
+              </div>
+            </>
+          )}
+
+          <div className="flex gap-3 pt-4">
+            <button
+              onClick={handleSaveNetworkEdit}
+              className="flex-1 py-3 bg-hyper-green text-black rounded-xl font-bold hover:bg-hyper-dark transition-colors"
+            >
+              Save
+            </button>
+            <button
+              onClick={() => setEditingNetwork(null)}
+              className="flex-1 py-3 bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-xl font-bold hover:bg-[var(--hover-bg)] transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

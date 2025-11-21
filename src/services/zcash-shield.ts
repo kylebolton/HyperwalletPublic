@@ -1,5 +1,6 @@
 import { WalletService } from "./wallet";
 import { ChainManager, SupportedChain } from "./chains/manager";
+import { NetworkService } from "./networks";
 
 export interface ShieldSwapQuote {
   fromAddress: string;
@@ -29,10 +30,12 @@ export class ZCashShieldService {
       throw new Error("Wallet mnemonic required for ZCash operations");
     }
 
+    const enabledNetworks = NetworkService.getEnabledNetworks();
     const manager = new ChainManager(
       activeWallet.privateKey || undefined,
       !!activeWallet.privateKey,
-      mnemonic
+      mnemonic,
+      enabledNetworks
     );
 
     const zcashService = manager.getService(SupportedChain.ZEC);

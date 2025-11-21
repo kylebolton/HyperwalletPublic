@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { ArrowUpRight, ArrowDownLeft, RefreshCw } from "lucide-react";
 import { ChainManager, SupportedChain } from "../services/chains/manager";
+import { NetworkService } from "../services/networks";
 import { StorageService } from "../services/storage";
 import { WalletService } from "../services/wallet";
 import { HistoryService, type Transaction } from "../services/history";
@@ -21,10 +22,12 @@ export default function History() {
         return;
       }
 
+      const enabledNetworks = NetworkService.getEnabledNetworks();
       const manager = new ChainManager(
         privKey || undefined, // EVM secret (prefer private key)
         !!privKey, // Is private key
-        mnemonic || undefined // Non-EVM secret (mnemonic)
+        mnemonic || undefined, // Non-EVM secret (mnemonic)
+        enabledNetworks // Network configurations
       );
       const services = manager.getAllServices();
 

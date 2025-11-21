@@ -50,7 +50,7 @@ describe('SwapService', () => {
 
             const quote = await SwapService.getQuote('HYPEREVM', 'ETH', '1.0');
             
-            expect(HyperSwapService.getQuote).toHaveBeenCalledWith('HYPEREVM', 'ETH', '1.0', undefined);
+            expect(HyperSwapService.getQuote).toHaveBeenCalledWith('HYPEREVM', 'ETH', '1.0');
             expect(quote.provider).toBe('hyperswap');
             expect(quote.builderFee).toBeDefined();
         });

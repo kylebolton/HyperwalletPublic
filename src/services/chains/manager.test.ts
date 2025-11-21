@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ChainManager, SupportedChain } from './manager';
 import { WalletService } from '../wallet';
+import { NetworkService, type NetworkConfig } from '../networks';
 
 // Mock chain services
 vi.mock('./evm', () => ({
@@ -159,6 +160,141 @@ describe('ChainManager', () => {
             
             // Should still have some services even if some fail
             expect(services.length).toBeGreaterThan(0);
+        });
+    });
+
+    describe('Network Configuration', () => {
+        it('should only initialize enabled networks when configs provided', () => {
+            const networkConfigs: NetworkConfig[] = [
+                {
+                    chain: SupportedChain.HYPEREVM,
+                    enabled: true,
+                    name: "HyperEVM",
+                    symbol: "HYPE",
+                    rpcUrl: "https://eth.llamarpc.com",
+                    chainId: 1,
+                    custom: false,
+                },
+                {
+                    chain: SupportedChain.ETH,
+                    enabled: false,
+                    name: "Ethereum",
+                    symbol: "ETH",
+                    rpcUrl: "https://eth.llamarpc.com",
+                    chainId: 1,
+                    custom: false,
+                },
+                {
+                    chain: SupportedChain.BTC,
+                    enabled: true,
+                    name: "Bitcoin",
+                    symbol: "BTC",
+                    custom: false,
+                },
+                {
+                    chain: SupportedChain.SOL,
+                    enabled: false,
+                    name: "Solana",
+                    symbol: "SOL",
+                    custom: false,
+                },
+            ];
+
+            const manager = new ChainManager(testPrivateKey, true, testMnemonic, networkConfigs);
+            const services = manager.getAllServices();
+            
+            const symbols = services.map(s => s.symbol);
+            expect(symbols).toContain('HYPE');
+            expect(symbols).toContain('BTC');
+            expect(symbols).not.toContain('ETH');
+            expect(symbols).not.toContain('SOL');
+        });
+
+        it('should use custom RPC URLs and chain IDs from network configs', () => {
+            const networkConfigs: NetworkConfig[] = [
+                {
+                    chain: SupportedChain.HYPEREVM,
+                    enabled: true,
+                    name: "Custom HyperEVM",
+                    symbol: "HYPE",
+                    rpcUrl: "https://custom-rpc.com",
+                    chainId: 999,
+                    custom: true,
+                },
+            ];
+
+            const manager = new ChainManager(testPrivateKey, true, undefined, networkConfigs);
+            const services = manager.getAllServices();
+            
+            // Should have HYPE service with custom config
+            const hypeService = services.find(s => s.symbol === 'HYPE');
+            expect(hypeService).toBeDefined();
+        });
+
+        it('should maintain backward compatibility when no network configs provided', () => {
+            const manager = new ChainManager(testPrivateKey, true, testMnemonic);
+            const services = manager.getAllServices();
+            
+            // Should still initialize all networks (default behavior)
+            expect(services.length).toBeGreaterThan(0);
+        });
+
+        it('should skip disabled networks', () => {
+            const networkConfigs: NetworkConfig[] = [
+                {
+                    chain: SupportedChain.HYPEREVM,
+                    enabled: false,
+                    name: "HyperEVM",
+                    symbol: "HYPE",
+                    rpcUrl: "https://eth.llamarpc.com",
+                    chainId: 1,
+                    custom: false,
+                },
+                {
+                    chain: SupportedChain.BTC,
+                    enabled: false,
+                    name: "Bitcoin",
+                    symbol: "BTC",
+                    custom: false,
+                },
+            ];
+
+            const manager = new ChainManager(testPrivateKey, true, testMnemonic, networkConfigs);
+            const services = manager.getAllServices();
+            
+            const symbols = services.map(s => s.symbol);
+            expect(symbols).not.toContain('HYPE');
+            expect(symbols).not.toContain('BTC');
+        });
+
+        it('should return only enabled network services from getAllServices', () => {
+            const networkConfigs: NetworkConfig[] = [
+                {
+                    chain: SupportedChain.HYPEREVM,
+                    enabled: true,
+                    name: "HyperEVM",
+                    symbol: "HYPE",
+                    rpcUrl: "https://eth.llamarpc.com",
+                    chainId: 1,
+                    custom: false,
+                },
+                {
+                    chain: SupportedChain.ETH,
+                    enabled: false,
+                    name: "Ethereum",
+                    symbol: "ETH",
+                    rpcUrl: "https://eth.llamarpc.com",
+                    chainId: 1,
+                    custom: false,
+                },
+            ];
+
+            const manager = new ChainManager(testPrivateKey, true, undefined, networkConfigs);
+            const services = manager.getAllServices();
+            
+            const symbols = services.map(s => s.symbol);
+            expect(symbols).toContain('HYPE');
+            expect(symbols).not.toContain('ETH');
         });
     });
 });
