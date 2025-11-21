@@ -1,15 +1,17 @@
-import { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { ChainManager, SupportedChain } from "../services/chains/manager";
 import { StorageService } from "../services/storage";
 import { WalletService } from "../services/wallet";
 import { NetworkService } from "../services/networks";
 import { TokenService, type TokenInfo } from "../services/tokens";
-import { MarketService } from "../services/market";
+import { MarketService, type MarketData } from "../services/market";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowUpRight, ArrowDownLeft, ChevronDown, ChevronUp } from "lucide-react";
 import ReceiveModal from "../components/ReceiveModal";
 import SendModal from "../components/SendModal";
 import AssetLogo from "../components/AssetLogo";
+import { usePreviewMode } from "../contexts/PreviewModeContext";
+import { PreviewDataService } from "../services/previewData";
 
 interface Asset {
   symbol: string;
@@ -26,6 +28,7 @@ interface AssetCardProps {
   onSend: () => void;
   onReceive: () => void;
   index: number;
+  marketData?: Record<string, MarketData>;
 }
 
 function AssetCard({
@@ -36,7 +39,26 @@ function AssetCard({
   onSend,
   onReceive,
   index,
+  marketData,
 }: AssetCardProps) {
+  // Calculate USD value
+  const usdValue = React.useMemo(() => {
+    if (isLoading || !marketData) return null;
+    if (!balance || balance === "Error" || balance === "N/A") return 0;
+    
+    const balanceNum = parseFloat(balance);
+    if (isNaN(balanceNum) || balanceNum === 0) return 0;
+    
+    // Try asset.symbol first, then fallback to common aliases
+    const price = marketData[asset.symbol]?.current_price || 
+                  marketData[asset.symbol === "HYPEREVM" ? "HYPE" : asset.symbol]?.current_price || 
+                  0;
+    
+    if (!price || price === 0) return null;
+    
+    return balanceNum * price;
+  }, [balance, marketData, asset.symbol, isLoading]);
+
   return (
     <motion.div
       initial={{ opacity: 0, x: -20 }}
@@ -64,9 +86,15 @@ function AssetCard({
         </div>
       </div>
 
-      <div className="text-right min-w-[100px] flex-shrink-0">
+      <div className="text-right min-w-[120px] flex-shrink-0">
         <div className="text-xs text-[var(--text-secondary)]">
-          ≈ $0.00 USD
+          {isLoading ? (
+            <div className="h-4 w-16 bg-[var(--bg-tertiary)] rounded animate-pulse"></div>
+          ) : usdValue !== null ? (
+            `≈ $${usdValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`
+          ) : (
+            "≈ $0.00 USD"
+          )}
         </div>
       </div>
 
@@ -96,6 +124,7 @@ function AssetCard({
 }
 
 export default function Dashboard() {
+  const { isPreviewMode } = usePreviewMode();
   const [balances, setBalances] = useState<Record<string, string>>({});
   const [addresses, setAddresses] = useState<Record<string, string>>({});
   const [hyperEVMTokens, setHyperEVMTokens] = useState<TokenInfo[]>([]);
@@ -103,6 +132,7 @@ export default function Dashboard() {
   const [isHyperEVMExpanded, setIsHyperEVMExpanded] = useState(true);
   const [totalBalance, setTotalBalance] = useState<number | null>(null);
   const [loadingBalance, setLoadingBalance] = useState(true);
+  const [marketData, setMarketData] = useState<Record<string, MarketData>>({});
 
   // Calculate total balance in USD
   const calculateTotalBalance = useCallback(async (balanceData: Record<string, string>) => {
@@ -171,6 +201,32 @@ export default function Dashboard() {
     let timeoutId: NodeJS.Timeout;
 
     const load = async () => {
+      // If preview mode is enabled, use mock data
+      if (isPreviewMode) {
+        const mockBalances = PreviewDataService.getMockBalances();
+        const mockAddresses = PreviewDataService.getMockAddresses();
+        const mockTokens = PreviewDataService.getMockHyperEVMTokens();
+        
+        setBalances(mockBalances);
+        setAddresses(mockAddresses);
+        setHyperEVMTokens(mockTokens);
+        setLoadingAssets(new Set());
+        
+        // Get mock market data for USD calculations
+        const mockMarketData = PreviewDataService.getMockMarketData();
+        setMarketData(mockMarketData);
+        
+        // Calculate total balance with mock data
+        let total = 0;
+        for (const [symbol, balance] of Object.entries(mockBalances)) {
+          const price = mockMarketData[symbol]?.current_price || 0;
+          total += parseFloat(balance) * price;
+        }
+        setTotalBalance(total);
+        setLoadingBalance(false);
+        return;
+      }
+
       try {
         const activeWallet = WalletService.getActiveWallet();
 
@@ -288,6 +344,22 @@ export default function Dashboard() {
         setBalances(newBalances);
         setAddresses(newAddresses);
 
+        // Fetch market data for all symbols
+        try {
+          const allSymbols = Object.keys(newBalances).filter(
+            symbol => newBalances[symbol] && newBalances[symbol] !== "Error" && newBalances[symbol] !== "N/A"
+          );
+          if (allSymbols.length > 0) {
+            const prices = await MarketService.getPrices(allSymbols);
+            if (isMounted) {
+              setMarketData(prices);
+            }
+          }
+        } catch (e) {
+          console.error("Failed to fetch market data:", e);
+          // Continue without market data
+        }
+
         // Load HyperEVM tokens separately - include common tokens even with 0 balance
         try {
           const hyperEVMService = manager.getService(SupportedChain.HYPEREVM);
@@ -340,6 +412,23 @@ export default function Dashboard() {
           });
           setBalances(newBalances);
           setAddresses(newAddresses);
+
+          // Update market data to include tokens
+          if (isMounted) {
+            try {
+              const allSymbols = Object.keys(newBalances).filter(
+                symbol => newBalances[symbol] && newBalances[symbol] !== "Error" && newBalances[symbol] !== "N/A"
+              );
+              if (allSymbols.length > 0) {
+                const prices = await MarketService.getPrices(allSymbols);
+                if (isMounted) {
+                  setMarketData(prev => ({ ...prev, ...prices }));
+                }
+              }
+            } catch (e) {
+              console.error("Failed to fetch market data for tokens:", e);
+            }
+          }
         } catch (e) {
           console.error("Failed to load HyperEVM tokens:", e);
           // Ensure at least HYPE is available
@@ -406,7 +495,7 @@ export default function Dashboard() {
       clearInterval(interval);
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, []);
+  }, [isPreviewMode]);
 
   // Calculate total balance when balances change
   useEffect(() => {
@@ -546,6 +635,7 @@ export default function Dashboard() {
                         balance={balances[asset.symbol]}
                         address={addresses[asset.symbol]}
                         isLoading={loadingAssets.has(asset.symbol)}
+                        marketData={marketData}
                         onSend={() =>
                           setSendModal({
                             isOpen: true,
@@ -677,6 +767,7 @@ export default function Dashboard() {
             balance={balances[asset.symbol]}
             address={addresses[asset.symbol]}
             isLoading={loadingAssets.has(asset.symbol)}
+            marketData={marketData}
             onSend={() =>
               setSendModal({
                 isOpen: true,

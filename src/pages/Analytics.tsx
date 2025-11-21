@@ -16,8 +16,11 @@ import {
   YAxis,
 } from "recharts";
 import { motion } from "framer-motion";
+import { usePreviewMode } from "../contexts/PreviewModeContext";
+import { PreviewDataService } from "../services/previewData";
 
 export default function Analytics() {
+  const { isPreviewMode } = usePreviewMode();
   const [marketData, setMarketData] = useState<Record<string, MarketData>>({});
   const [portfolio, setPortfolio] = useState<
     { name: string; value: number; symbol: string }[]
@@ -28,6 +31,16 @@ export default function Analytics() {
     let isMounted = true;
 
     const load = async () => {
+      // If preview mode is enabled, use mock data
+      if (isPreviewMode) {
+        const mockMarketData = PreviewDataService.getMockMarketData();
+        const mockPortfolio = PreviewDataService.getMockPortfolio();
+        setMarketData(mockMarketData);
+        setPortfolio(mockPortfolio);
+        setLoading(false);
+        return;
+      }
+
       try {
         const mnemonic = StorageService.getMnemonic();
         const privKey = WalletService.getStoredPrivateKey();
@@ -100,7 +113,7 @@ export default function Analytics() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [isPreviewMode]);
 
   const COLORS = ["#00FF9D", "#00C278", "#008552", "#00472C", "#002919"];
 

@@ -11,60 +11,64 @@ export interface NetworkConfig {
   custom: boolean;
 }
 
-const DEFAULT_NETWORKS: NetworkConfig[] = [
-  {
-    chain: SupportedChain.HYPEREVM,
-    enabled: true,
-    name: "HyperEVM",
-    symbol: "HYPE",
-    rpcUrl: "https://eth.llamarpc.com",
-    chainId: 1,
-    custom: false,
-  },
-  {
-    chain: SupportedChain.ETH,
-    enabled: true,
-    name: "Ethereum",
-    symbol: "ETH",
-    rpcUrl: "https://eth.llamarpc.com",
-    chainId: 1,
-    custom: false,
-  },
-  {
-    chain: SupportedChain.BTC,
-    enabled: true,
-    name: "Bitcoin",
-    symbol: "BTC",
-    custom: false,
-  },
-  {
-    chain: SupportedChain.SOL,
-    enabled: true,
-    name: "Solana",
-    symbol: "SOL",
-    custom: false,
-  },
-  {
-    chain: SupportedChain.XMR,
-    enabled: true,
-    name: "Monero",
-    symbol: "XMR",
-    custom: false,
-  },
-  {
-    chain: SupportedChain.ZEC,
-    enabled: true,
-    name: "ZCash",
-    symbol: "ZEC",
-    custom: false,
-  },
-];
+// Lazy initialization to avoid circular dependency issues
+function getDefaultNetworks(): NetworkConfig[] {
+  return [
+    {
+      chain: SupportedChain.HYPEREVM,
+      enabled: true,
+      name: "HyperEVM",
+      symbol: "HYPE",
+      rpcUrl: "https://eth.llamarpc.com",
+      chainId: 1,
+      custom: false,
+    },
+    {
+      chain: SupportedChain.ETH,
+      enabled: true,
+      name: "Ethereum",
+      symbol: "ETH",
+      rpcUrl: "https://eth.llamarpc.com",
+      chainId: 1,
+      custom: false,
+    },
+    {
+      chain: SupportedChain.BTC,
+      enabled: true,
+      name: "Bitcoin",
+      symbol: "BTC",
+      custom: false,
+    },
+    {
+      chain: SupportedChain.SOL,
+      enabled: true,
+      name: "Solana",
+      symbol: "SOL",
+      custom: false,
+    },
+    {
+      chain: SupportedChain.XMR,
+      enabled: true,
+      name: "Monero",
+      symbol: "XMR",
+      custom: false,
+    },
+    {
+      chain: SupportedChain.ZEC,
+      enabled: true,
+      name: "ZCash",
+      symbol: "ZEC",
+      custom: false,
+    },
+  ];
+}
 
 export class NetworkService {
   /**
    * Get all network configurations from storage or return defaults
    */
   static getNetworkConfigs(): NetworkConfig[] {
+    const DEFAULT_NETWORKS = getDefaultNetworks();
     const stored = StorageService.get(STORAGE_KEYS.NETWORKS);
     if (stored && Array.isArray(stored)) {
       // Merge stored configs with defaults to ensure all chains are present
@@ -134,7 +138,7 @@ export class NetworkService {
    * Reset all networks to defaults
    */
   static resetToDefaults(): void {
-    StorageService.save(STORAGE_KEYS.NETWORKS, DEFAULT_NETWORKS);
+    StorageService.save(STORAGE_KEYS.NETWORKS, getDefaultNetworks());
   }
 }
 
