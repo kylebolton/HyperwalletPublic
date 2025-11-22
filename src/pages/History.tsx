@@ -6,13 +6,24 @@ import { NetworkService } from "../services/networks";
 import { StorageService } from "../services/storage";
 import { WalletService } from "../services/wallet";
 import { HistoryService, type Transaction } from "../services/history";
+import { usePreviewMode } from "../contexts/PreviewModeContext";
+import { PreviewDataService } from "../services/previewData";
 
 export default function History() {
+  const { isPreviewMode } = usePreviewMode();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchHistory = async () => {
+      // If preview mode is enabled, use mock data
+      if (isPreviewMode) {
+        const mockTransactions = PreviewDataService.getMockTransactions();
+        setTransactions(mockTransactions);
+        setLoading(false);
+        return;
+      }
+
       const mnemonic = StorageService.getMnemonic();
       const privKey = WalletService.getStoredPrivateKey();
 
@@ -65,7 +76,7 @@ export default function History() {
     };
 
     fetchHistory();
-  }, []);
+  }, [isPreviewMode]);
 
   return (
     <div className="space-y-8">

@@ -7,10 +7,13 @@ import {
 import { ChainManager, SupportedChain } from "../services/chains/manager";
 import { NetworkService } from "../services/networks";
 import { WalletService } from "../services/wallet";
+import { usePreviewMode } from "../contexts/PreviewModeContext";
+import { PreviewDataService } from "../services/previewData";
 import { motion } from "framer-motion";
 import { ArrowRightLeft, Shield, Wallet } from "lucide-react";
 
 export default function Swap() {
+  const { isPreviewMode } = usePreviewMode();
   const [from, setFrom] = useState("HYPEREVM");
   const [to, setTo] = useState("XMR");
   const [amount, setAmount] = useState("");
@@ -27,6 +30,7 @@ export default function Swap() {
   const [addressError, setAddressError] = useState<string | null>(null);
   const [loadingWalletAddress, setLoadingWalletAddress] = useState(false);
   const [walletInitStatus, setWalletInitStatus] = useState<string | null>(null);
+  const [shieldProofEnabled, setShieldProofEnabled] = useState(false);
 
   // Check if ZCash is involved (for Shield Swap branding)
   const isZCashSwap =
@@ -37,36 +41,99 @@ export default function Swap() {
   const handleGetQuote = async () => {
     if (!amount) return;
     setLoading(true);
+    setSwapStatus(null);
 
-    // Handle shield swap for ZCash
-    if (
-      isShieldSwap &&
-      (from.toUpperCase() === "ZEC" || to.toUpperCase() === "ZEC")
-    ) {
-      try {
-        const fromType =
-          shieldMode === "transparent" ? "transparent" : "shielded";
-        const toType =
-          shieldMode === "transparent" ? "shielded" : "transparent";
-        const sq = await ZCashShieldService.getShieldSwapQuote(
-          fromType,
-          toType,
-          amount
-        );
-        setShieldQuote(sq);
-        setQuote(null);
-      } catch (e: any) {
-        console.error("Shield swap quote failed:", e);
-        setSwapStatus(`Shield swap error: ${e.message}`);
+    try {
+      // Handle shield swap for ZCash
+      if (
+        isShieldSwap &&
+        (from.toUpperCase() === "ZEC" || to.toUpperCase() === "ZEC")
+      ) {
+        if (isPreviewMode) {
+          // Mock shield swap quote for preview mode
+          const fee = (parseFloat(amount) * 0.001).toFixed(8);
+          const mockQuote: ShieldSwapQuote = {
+            fromAddress: "t1MockAddress123456789",
+            toAddress: "t1MockAddress123456789",
+            fromType: shieldMode === "transparent" ? "transparent" : "shielded",
+            toType: shieldMode === "transparent" ? "shielded" : "transparent",
+            amount: (parseFloat(amount) - parseFloat(fee)).toFixed(8),
+            fee: fee,
+          };
+          setShieldQuote(mockQuote);
+          setQuote(null);
+        } else {
+          const fromType =
+            shieldMode === "transparent" ? "transparent" : "shielded";
+          const toType =
+            shieldMode === "transparent" ? "shielded" : "transparent";
+          const sq = await ZCashShieldService.getShieldSwapQuote(
+            fromType,
+            toType,
+            amount
+          );
+          setShieldQuote(sq);
+          setQuote(null);
+        }
+      } else {
+        // Regular swap
+        if (isPreviewMode) {
+          // Use preview market data for calculations
+          const mockMarketData = PreviewDataService.getMockMarketData();
+          const fromSymbol = from.toUpperCase() === "HYPEREVM" ? "HYPE" : from;
+          const toSymbol = to.toUpperCase() === "HYPEREVM" ? "HYPE" : to;
+          const fromPrice = mockMarketData[from]?.current_price || mockMarketData[fromSymbol]?.current_price || 0;
+          const toPrice = mockMarketData[to]?.current_price || mockMarketData[toSymbol]?.current_price || 1;
+
+          if (!fromPrice) {
+            throw new Error(`Price for ${from} not found`);
+          }
+
+          const isHyperEVMSwap = from.toUpperCase() === "HYPEREVM" || to.toUpperCase() === "HYPEREVM";
+          const rate = fromPrice / toPrice;
+          const amountNum = parseFloat(amount);
+          
+          let amountOut: number;
+          let builderFee: string | undefined;
+          
+          if (isHyperEVMSwap) {
+            // HyperSwap: builder fee is 1% of output, deducted from output
+            const amountOutBeforeFee = amountNum * rate;
+            builderFee = (amountOutBeforeFee * 0.01).toFixed(6);
+            amountOut = amountOutBeforeFee * 0.99; // Deduct 1% builder fee
+          } else {
+            // SwapZone: platform fee is 1% of input, deducted from output
+            const platformFee = amountNum * 0.01;
+            const amountAfterFee = amountNum - platformFee;
+            amountOut = amountAfterFee * rate;
+          }
+
+          const mockQuote: SwapQuote = {
+            fromCurrency: from,
+            toCurrency: to,
+            amountIn: amount,
+            amountOut: amountOut.toFixed(6),
+            rate: rate.toFixed(6),
+            fee: isHyperEVMSwap ? "0" : (amountNum * 0.01).toFixed(6) + " " + from,
+            provider: isHyperEVMSwap ? "hyperswap" : "swapzone",
+            builderFee: builderFee,
+          };
+          setQuote(mockQuote);
+          setShieldQuote(null);
+        } else {
+          const q = await SwapService.getQuote(from, to, amount);
+          setQuote(q);
+          setShieldQuote(null);
+        }
       }
-    } else {
-      // Regular swap
-      const q = await SwapService.getQuote(from, to, amount);
-      setQuote(q);
+    } catch (e: any) {
+      console.error("Quote failed:", e);
+      setSwapStatus(`Error: ${e.message || "Failed to get quote"}`);
+      setQuote(null);
       setShieldQuote(null);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   const handleSwap = async () => {
@@ -84,6 +151,20 @@ export default function Swap() {
         return;
       }
       destAddress = walletAddress;
+    }
+
+    if (isPreviewMode) {
+      // Mock swap execution for preview mode
+      setLoading(true);
+      setTimeout(() => {
+        if (shieldQuote) {
+          setSwapStatus(`Preview: Shield swap would execute! Amount: ${shieldQuote.amount} ${to}, Fee: ${shieldQuote.fee} ZEC`);
+        } else if (quote) {
+          setSwapStatus(`Preview: Swap would execute! You would receive ${quote.amountOut} ${to} for ${quote.amountIn} ${from}`);
+        }
+        setLoading(false);
+      }, 1000);
+      return;
     }
 
     if (shieldQuote) {
@@ -135,6 +216,15 @@ export default function Swap() {
       const chainKey = getChainKey(to);
       if (!chainKey) {
         setWalletAddress(null);
+        return;
+      }
+
+      // In preview mode, use mock addresses
+      if (isPreviewMode) {
+        const mockAddresses = PreviewDataService.getMockAddresses();
+        const symbol = to.toUpperCase() === "HYPEREVM" ? "HYPE" : to;
+        setWalletAddress(mockAddresses[symbol] || mockAddresses[to] || "0x0000000000000000000000000000000000000000");
+        setLoadingWalletAddress(false);
         return;
       }
 
@@ -199,7 +289,7 @@ export default function Swap() {
     if (!useCustomDestination) {
       fetchWalletAddress();
     }
-  }, [to, useCustomDestination]);
+  }, [to, useCustomDestination, isPreviewMode]);
 
   // Validate destination address when custom destination is used
   useEffect(() => {
@@ -397,6 +487,65 @@ export default function Swap() {
                 ))}
               </select>
             </div>
+          </div>
+
+          {/* Shield Proof Toggle */}
+          <div className="p-6 bg-[var(--bg-tertiary)] rounded-2xl border border-[var(--border-primary)] transition-colors">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Shield 
+                  size={20} 
+                  className={`transition-colors ${
+                    shieldProofEnabled 
+                      ? "text-hyper-green" 
+                      : "text-[var(--text-secondary)]"
+                  }`}
+                />
+                <div>
+                  <label className="text-sm font-bold text-[var(--text-primary)] block">
+                    Shield Proof
+                  </label>
+                  <p className="text-xs text-[var(--text-secondary)] mt-1">
+                    Enable zero-knowledge privacy protection for this swap
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShieldProofEnabled(!shieldProofEnabled)}
+                className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-hyper-green focus:ring-offset-2 ${
+                  shieldProofEnabled
+                    ? "bg-hyper-green"
+                    : "bg-[var(--bg-secondary)] border border-[var(--border-primary)]"
+                }`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                    shieldProofEnabled ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </div>
+            {shieldProofEnabled && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                className="mt-4 pt-4 border-t border-[var(--border-primary)]"
+              >
+                <div className="flex items-start gap-2">
+                  <Shield size={16} className="text-hyper-green mt-0.5 flex-shrink-0" />
+                  <div className="text-xs text-[var(--text-secondary)] leading-relaxed">
+                    <p className="font-medium text-[var(--text-primary)] mb-1">
+                      Privacy Protection Active
+                    </p>
+                    <p>
+                      Your swap transaction will be protected with zero-knowledge proofs, 
+                      ensuring your transaction amounts and addresses remain private.
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+            )}
           </div>
 
           {/* Destination Address Section */}
