@@ -36,10 +36,10 @@ describe('SwapService', () => {
     });
 
     describe('getQuote - Routing Logic', () => {
-        it('should route HyperEVM swaps to HyperSwap', async () => {
+        it('should route HyperEVM token swaps to HyperSwap', async () => {
             (HyperSwapService.getQuote as any).mockResolvedValue({
-                fromCurrency: 'HYPEREVM',
-                toCurrency: 'ETH',
+                fromCurrency: 'HYPE',
+                toCurrency: 'USDT',
                 amountIn: '1.0',
                 amountOut: '0.99',
                 rate: '0.99',
@@ -48,14 +48,32 @@ describe('SwapService', () => {
                 path: []
             });
 
-            const quote = await SwapService.getQuote('HYPEREVM', 'ETH', '1.0');
+            const quote = await SwapService.getQuote('HYPE', 'USDT', '1.0');
             
-            expect(HyperSwapService.getQuote).toHaveBeenCalledWith('HYPEREVM', 'ETH', '1.0');
+            expect(HyperSwapService.getQuote).toHaveBeenCalledWith('HYPE', 'USDT', '1.0');
             expect(quote.provider).toBe('hyperswap');
             expect(quote.builderFee).toBeDefined();
         });
 
-        it('should route non-HyperEVM swaps to SwapZone', async () => {
+        it('should route swaps between HyperEVM tokens to HyperSwap', async () => {
+            (HyperSwapService.getQuote as any).mockResolvedValue({
+                fromCurrency: 'USDT',
+                toCurrency: 'USDC',
+                amountIn: '100.0',
+                amountOut: '99.5',
+                rate: '0.995',
+                fee: '0',
+                builderFee: '0.5',
+                path: []
+            });
+
+            const quote = await SwapService.getQuote('USDT', 'USDC', '100.0');
+            
+            expect(quote.provider).toBe('hyperswap');
+            expect(quote.builderFee).toBeDefined();
+        });
+
+        it('should route cross-chain swaps to SwapZone', async () => {
             const axios = await import('axios');
             (axios.default.get as any).mockResolvedValue({
                 data: {
@@ -71,46 +89,40 @@ describe('SwapService', () => {
             expect(quote.fee).toBeDefined();
         });
 
-        it('should route swaps with HYPE symbol to HyperSwap', async () => {
-            (HyperSwapService.getQuote as any).mockResolvedValue({
-                fromCurrency: 'HYPE',
-                toCurrency: 'BTC',
-                amountIn: '1.0',
-                amountOut: '0.99',
-                rate: '0.99',
-                fee: '0',
-                builderFee: '0.01',
-                path: []
+        it('should route swaps from HyperEVM token to base chain to SwapZone', async () => {
+            const axios = await import('axios');
+            (axios.default.get as any).mockResolvedValue({
+                data: {
+                    toAmount: '0.99',
+                    estimatedAmount: '0.99'
+                }
             });
 
             const quote = await SwapService.getQuote('HYPE', 'BTC', '1.0');
             
-            expect(quote.provider).toBe('hyperswap');
+            expect(quote.provider).toBe('swapzone');
         });
 
-        it('should route swaps to HyperSwap when to currency is HYPEREVM', async () => {
-            (HyperSwapService.getQuote as any).mockResolvedValue({
-                fromCurrency: 'ETH',
-                toCurrency: 'HYPEREVM',
-                amountIn: '1.0',
-                amountOut: '0.99',
-                rate: '0.99',
-                fee: '0',
-                builderFee: '0.01',
-                path: []
+        it('should route swaps from base chain to HyperEVM token to SwapZone', async () => {
+            const axios = await import('axios');
+            (axios.default.get as any).mockResolvedValue({
+                data: {
+                    toAmount: '0.99',
+                    estimatedAmount: '0.99'
+                }
             });
 
-            const quote = await SwapService.getQuote('ETH', 'HYPEREVM', '1.0');
+            const quote = await SwapService.getQuote('ETH', 'USDT', '1.0');
             
-            expect(quote.provider).toBe('hyperswap');
+            expect(quote.provider).toBe('swapzone');
         });
     });
 
     describe('getQuote - Fee Calculation', () => {
         it('should include builder fee for HyperSwap quotes', async () => {
             (HyperSwapService.getQuote as any).mockResolvedValue({
-                fromCurrency: 'HYPEREVM',
-                toCurrency: 'ETH',
+                fromCurrency: 'HYPE',
+                toCurrency: 'USDT',
                 amountIn: '100.0',
                 amountOut: '99.0',
                 rate: '0.99',
@@ -119,7 +131,7 @@ describe('SwapService', () => {
                 path: []
             });
 
-            const quote = await SwapService.getQuote('HYPEREVM', 'ETH', '100.0');
+            const quote = await SwapService.getQuote('HYPE', 'USDT', '100.0');
             
             expect(quote.builderFee).toBe('1.0');
             expect(quote.fee).toBe('0');

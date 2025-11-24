@@ -76,25 +76,18 @@ export class ZCashChainService implements IChainService {
         throw new Error("ZCash: Invalid mnemonic provided");
       }
 
-      console.log("ZCash: Initializing with network:", network);
-
       const seed = bip39.mnemonicToSeedSync(mnemonic);
-      console.log("ZCash: Seed generated successfully");
 
       // Use Bitcoin network for BIP32 derivation (standard approach)
       // The derivation path handles the coin type difference
       const root = bip32.fromSeed(seed, bitcoin.networks.bitcoin);
-      console.log("ZCash: BIP32 root created");
 
       // ZCash BIP44 path: m/44'/133'/0'/0/0 (coin type 133 for ZCash)
       const path =
         network === "mainnet" ? "m/44'/133'/0'/0/0" : "m/44'/1'/0'/0/0";
-      console.log("ZCash: Deriving path:", path);
 
       try {
         const child = root.derivePath(path);
-        console.log("ZCash: Child key derived successfully");
-        console.log("ZCash: Public key length:", child.publicKey.length);
         this.keyPair = child;
 
         // Generate transparent address (P2PKH for ZCash) using ZCash network config
@@ -122,9 +115,6 @@ export class ZCashChainService implements IChainService {
             !address.startsWith("t1") &&
             !address.startsWith("t3"))
         ) {
-          console.log(
-            "ZCash: Manually encoding address with 2-byte ZCash version prefix"
-          );
           // ZCash transparent addresses use 2-byte version numbers
           // Format: [version_byte_1][version_byte_2][hash160]
           const hash160 = bitcoin.crypto.hash160(child.publicKey);
@@ -183,13 +173,6 @@ export class ZCashChainService implements IChainService {
           }
 
           address = base58Encode(addressBuffer);
-
-          console.log(
-            "ZCash: Manually encoded address with 2-byte version:",
-            address
-          );
-          console.log("ZCash: Version bytes:", versionBytes.toString("hex"));
-          console.log("ZCash: Address starts with:", address.substring(0, 2));
         }
 
         if (!address) {
@@ -199,8 +182,6 @@ export class ZCashChainService implements IChainService {
         }
 
         this.transparentAddress = address;
-        console.log("ZCash: Final address:", this.transparentAddress);
-        console.log("ZCash: Address length:", this.transparentAddress.length);
 
         // Verify address starts with correct prefix
         if (network === "mainnet") {
@@ -236,13 +217,6 @@ export class ZCashChainService implements IChainService {
             }
             throw new Error(
               `ZCash: Invalid address format generated: ${this.transparentAddress} (expected t1 or t3 prefix)`
-            );
-          } else {
-            console.log(
-              `ZCash: Address format verified - starts with ${this.transparentAddress.substring(
-                0,
-                2
-              )}`
             );
           }
         }

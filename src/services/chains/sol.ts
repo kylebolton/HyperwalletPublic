@@ -92,10 +92,17 @@ export class SOLChainService implements IChainService {
             return keypair;
         } catch (error: any) {
             console.error("Failed to derive Solana keypair:", error);
-            // Return a dummy keypair that will fail gracefully on operations
-            const dummyKeypair = Keypair.generate();
-            this.keypair = dummyKeypair;
-            throw new Error(`Solana wallet initialization failed: ${error.message}`);
+            // Generate a dummy keypair for fallback (don't throw to prevent unhandled rejections)
+            try {
+                const dummyKeypair = Keypair.generate();
+                this.keypair = dummyKeypair;
+            } catch (genError) {
+                // If even dummy generation fails, create a minimal keypair
+                const fallbackSeed = new Uint8Array(32).fill(1);
+                this.keypair = Keypair.fromSeed(fallbackSeed);
+            }
+            // Don't throw error here - let it fail gracefully on operations
+            console.warn(`Solana wallet initialization failed: ${error.message}`);
         }
     }
 

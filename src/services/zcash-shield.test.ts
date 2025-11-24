@@ -9,13 +9,18 @@ vi.mock('./wallet');
 vi.mock('./networks');
 vi.mock('./chains/manager', async () => {
   const actual = await vi.importActual('./chains/manager');
+  const mockZCashService = {
+    getAddress: vi.fn().mockResolvedValue('t1TestAddress123'),
+  };
+  
   return {
     ...actual,
-    ChainManager: vi.fn().mockImplementation(() => ({
-      getService: vi.fn().mockReturnValue({
-        getAddress: vi.fn().mockResolvedValue('t1TestAddress123'),
-      }),
-    })),
+    ChainManager: class {
+      constructor() {}
+      getService() {
+        return mockZCashService;
+      }
+    },
   };
 });
 
@@ -131,6 +136,7 @@ describe('ZCashShieldService', () => {
     });
   });
 });
+
 
 
 

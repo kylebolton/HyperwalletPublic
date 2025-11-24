@@ -171,13 +171,10 @@ export class ChainManager {
       const zecConfig = getNetworkConfig(SupportedChain.ZEC);
       if (zecConfig) {
         try {
-          console.log("ChainManager: Initializing ZCash service...");
           const zecService = new ZCashChainService(this.nonEvmSecret);
-          console.log("ChainManager: ZCash service initialized successfully");
           this.services.set(SupportedChain.ZEC, zecService);
         } catch (e: any) {
           console.error("ChainManager: ZCash service initialization failed:", e);
-          console.error("ChainManager: ZCash error details:", e.message, e.stack);
           // Don't add ZEC service if it fails to initialize - let it fail so errors are visible
           // This will cause getService() to throw an error which will be caught in Dashboard
         }

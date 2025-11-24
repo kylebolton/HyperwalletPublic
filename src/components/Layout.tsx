@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   LayoutDashboard,
   Repeat,
@@ -19,6 +19,7 @@ import { WalletService } from "../services/wallet";
 import { ChainManager } from "../services/chains/manager";
 import { NetworkService } from "../services/networks";
 import type { Wallet } from "../services/storage";
+import { enableConsoleLogs, suppressConsoleLogs } from "../utils/consoleSuppress";
 
 export default function Layout() {
   const location = useLocation();
@@ -27,6 +28,16 @@ export default function Layout() {
   const [activeWallet, setActiveWallet] = useState<Wallet | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(true);
+  const [syncStatus, setSyncStatus] = useState<string>("Connecting to chains...");
+
+  // Console log suppression - enable/disable based on sync status
+  useEffect(() => {
+    if (isSyncing) {
+      suppressConsoleLogs();
+    } else {
+      enableConsoleLogs();
+    }
+  }, [isSyncing]);
 
   const navItems = [
     { icon: LayoutDashboard, label: "Portfolio", path: "/" },
@@ -62,7 +73,10 @@ export default function Layout() {
         const active = WalletService.getActiveWallet();
         
         if (!active) {
-          if (isMounted) setIsSyncing(false);
+          if (isMounted) {
+            setIsSyncing(false);
+            setSyncStatus("No wallet");
+          }
           return;
         }
 
@@ -70,12 +84,18 @@ export default function Layout() {
         const privKey = active.privateKey;
 
         if (!mnemonic && !privKey) {
-          if (isMounted) setIsSyncing(false);
+          if (isMounted) {
+            setIsSyncing(false);
+            setSyncStatus("No wallet credentials");
+          }
           return;
         }
 
         // Set syncing to true while we check
-        if (isMounted) setIsSyncing(true);
+        if (isMounted) {
+          setIsSyncing(true);
+          setSyncStatus("Connecting to chains...");
+        }
 
         // Get enabled network configs
         const enabledNetworks = NetworkService.getEnabledNetworks();
@@ -90,16 +110,18 @@ export default function Layout() {
         const services = manager.getAllServices();
 
         // Initialize services that need it
-        const initPromises = services.map(async service => {
+        const initPromises = services.map(async (service, index) => {
           try {
             if ('init' in service && typeof service.init === 'function') {
+              if (isMounted) setSyncStatus(`Initializing ${service.symbol}...`);
               await service.init();
             }
             // Try to get address to verify it's working
+            if (isMounted) setSyncStatus(`Verifying ${service.symbol}...`);
             await service.getAddress();
             return true;
           } catch (e) {
-            console.warn(`${service.symbol}: Initialization/sync check failed:`, e);
+            // Suppress warning during sync
             return false;
           }
         });
@@ -113,12 +135,18 @@ export default function Layout() {
         ]);
 
         // All wallets synced
-        if (isMounted) setIsSyncing(false);
+        if (isMounted) {
+          setSyncStatus("Connected");
+          setIsSyncing(false);
+        }
       } catch (e) {
-        console.warn("Wallet sync check failed:", e);
+        // Suppress warning during sync - it will be shown after sync completes
         // On error, still mark as synced after a delay (to show we tried)
         syncTimeout = setTimeout(() => {
-          if (isMounted) setIsSyncing(false);
+          if (isMounted) {
+            setSyncStatus("Connection failed");
+            setIsSyncing(false);
+          }
         }, 2000);
       }
     };
@@ -263,9 +291,16 @@ export default function Layout() {
             {isSyncing ? (
               <>
                 <Loader2 size={16} className="text-yellow-500 animate-spin" />
-                <span className="text-xs font-bold text-yellow-500">
-                  STATUS: CONNECTING
-                </span>
+                <div className="flex flex-col">
+                  <span className="text-xs font-bold text-yellow-500">
+                    STATUS: CONNECTING
+                  </span>
+                  {syncStatus && syncStatus !== "Connecting to chains..." && (
+                    <span className="text-xs text-yellow-400 mt-0.5">
+                      {syncStatus}
+                    </span>
+                  )}
+                </div>
               </>
             ) : (
               <>

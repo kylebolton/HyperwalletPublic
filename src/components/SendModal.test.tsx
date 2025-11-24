@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { Mock } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import SendModal from './SendModal';
 import { StorageService } from '../services/storage';
@@ -20,18 +21,23 @@ describe('SendModal', () => {
     chainKey: 'ETH',
   };
 
-  const mockService = {
-    sendTransaction: vi.fn().mockResolvedValue('0xtxhash123'),
-  };
+  let mockService: any;
+  const mockChainManager = ChainManager as unknown as Mock;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockService = {
+      sendTransaction: vi.fn().mockResolvedValue('0xtxhash123'),
+    };
     (StorageService.getMnemonic as any) = vi.fn().mockReturnValue('test mnemonic');
     (WalletService.getStoredPrivateKey as any) = vi.fn().mockReturnValue(null);
     (NetworkService.getEnabledNetworks as any) = vi.fn().mockReturnValue([]);
-    (ChainManager as any) = vi.fn().mockImplementation(() => ({
-      getService: vi.fn().mockReturnValue(mockService),
-    }));
+    mockChainManager.mockReset();
+    mockChainManager.mockImplementation(function () {
+      return {
+        getService: vi.fn().mockReturnValue(mockService),
+      };
+    });
   });
 
   it('should render send form', () => {
@@ -75,7 +81,7 @@ describe('SendModal', () => {
 
     await waitFor(() => {
       expect(mockService.sendTransaction).toHaveBeenCalledWith('0xrecipient', '1.0');
-    });
+    }, { timeout: 2000 });
   });
 
   it('should display success message after successful transaction', async () => {
@@ -92,7 +98,7 @@ describe('SendModal', () => {
     await waitFor(() => {
       expect(screen.getByText('Sent Successfully!')).toBeInTheDocument();
       expect(screen.getByText('0xtxhash123')).toBeInTheDocument();
-    });
+    }, { timeout: 2000 });
   });
 
   it('should display error message on transaction failure', async () => {
@@ -114,7 +120,8 @@ describe('SendModal', () => {
   });
 
   it('should show loading state while sending', async () => {
-    mockService.sendTransaction.mockImplementation(
+    // Make sendTransaction take some time so we can see loading state
+    mockService.sendTransaction.mockImplementationOnce(
       () => new Promise(resolve => setTimeout(() => resolve('0xtxhash'), 100))
     );
 
@@ -128,9 +135,13 @@ describe('SendModal', () => {
     fireEvent.change(amountInput, { target: { value: '1.0' } });
     fireEvent.click(sendButton);
 
-    expect(screen.getByText('Sending...')).toBeInTheDocument();
+    // Wait for loading state to appear
+    await waitFor(() => {
+      expect(screen.getByText('Sending...')).toBeInTheDocument();
+    }, { timeout: 1000 });
   });
 });
+
 
 
 

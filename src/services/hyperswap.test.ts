@@ -3,37 +3,29 @@ import { HyperSwapService } from './hyperswap';
 import { ethers } from 'ethers';
 
 // Mock ethers
+const mockContract = {
+    getAmountsOut: vi.fn(),
+    exactInputSingle: vi.fn(),
+};
+
+const mockProvider = {
+    getBalance: vi.fn(),
+};
+
+const mockWallet = {
+    connect: vi.fn().mockReturnThis(),
+    getAddress: vi.fn().mockResolvedValue('0x123'),
+};
+
 vi.mock('ethers', async () => {
     const actual = await vi.importActual('ethers');
-    const mockProvider = {
-        getBalance: vi.fn(),
-    };
-
-    const mockContract = {
-        getAmountsOut: vi.fn(),
-        exactInputSingle: vi.fn(),
-    };
-
-    const mockWallet = {
-        connect: vi.fn().mockReturnThis(),
-        getAddress: vi.fn().mockResolvedValue('0x123'),
-    };
-
     return {
         ...actual,
         ethers: {
             ...(actual as any).ethers,
-            JsonRpcProvider: class {
-                constructor() {
-                    return mockProvider;
-                }
-            },
+            JsonRpcProvider: vi.fn().mockImplementation(() => mockProvider),
             Contract: vi.fn().mockImplementation(() => mockContract),
-            Wallet: class {
-                constructor() {
-                    return mockWallet;
-                }
-            },
+            Wallet: vi.fn().mockImplementation(() => mockWallet),
             parseUnits: (actual as any).ethers.parseUnits || vi.fn((value: string, decimals: number) => BigInt(value) * BigInt(10 ** decimals)),
             formatUnits: (actual as any).ethers.formatUnits || vi.fn((value: bigint, decimals: number) => (Number(value) / 10 ** decimals).toString()),
             ZeroAddress: '0x0000000000000000000000000000000000000000',

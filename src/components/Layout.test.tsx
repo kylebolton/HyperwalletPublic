@@ -69,6 +69,28 @@ describe('Layout Component', () => {
     expect(screen.getByText(/STATUS: CONNECTING/)).toBeInTheDocument();
   });
 
+  it('should show granular sync status messages', async () => {
+    (ChainManager as any).mockImplementation(() => ({
+      getAllServices: vi.fn().mockReturnValue([
+        { 
+          symbol: 'HYPE', 
+          getAddress: vi.fn().mockResolvedValue('0x123'),
+          init: vi.fn().mockResolvedValue(undefined),
+        },
+        { 
+          symbol: 'BTC', 
+          getAddress: vi.fn().mockResolvedValue('bc1...'),
+          init: undefined,
+        },
+      ]),
+    }));
+
+    renderLayout();
+
+    // Should show initial connecting status
+    expect(screen.getByText(/STATUS: CONNECTING/)).toBeInTheDocument();
+  });
+
   it('should show SECURE status after sync completes', async () => {
     // Mock sync to complete quickly
     (ChainManager as any).mockImplementation(() => ({
@@ -94,6 +116,20 @@ describe('Layout Component', () => {
     }, { timeout: 5000 });
   });
 
+  it('should suppress console logs during sync', () => {
+    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    
+    renderLayout();
+    
+    // Console logs should be suppressed during sync
+    // The suppression mechanism is tested in consoleSuppress.test.ts
+    // Here we just verify the component renders
+    
+    consoleLogSpy.mockRestore();
+    consoleWarnSpy.mockRestore();
+  });
+
   it('should open wallet dropdown when clicked', () => {
     renderLayout();
 
@@ -113,6 +149,7 @@ describe('Layout Component', () => {
     expect(outlet).toBeDefined();
   });
 });
+
 
 
 

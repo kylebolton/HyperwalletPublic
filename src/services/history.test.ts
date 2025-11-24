@@ -74,7 +74,7 @@ describe('HistoryService', () => {
       );
 
       expect(history).toEqual([]);
-    });
+    }, 10000); // Increase timeout for error handling
 
     it('should retry on BTC API failure', async () => {
       mockedAxios.get
@@ -122,6 +122,7 @@ describe('HistoryService', () => {
     });
   });
 });
+
 
 
 

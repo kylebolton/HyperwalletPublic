@@ -21,19 +21,19 @@ vi.mock('./storage', () => ({
 
 vi.mock('ethers', async () => {
     const actual = await vi.importActual('ethers');
+    const walletMock = vi.fn().mockImplementation(function(key: string) {
+        if (!key || key.length < 66) {
+            throw new Error('Invalid private key');
+        }
+        this.address = '0x1234567890123456789012345678901234567890';
+        this.privateKey = '0x' + '1'.repeat(64);
+        return this;
+    });
     return {
         ...actual,
         ethers: {
             ...(actual as any).ethers,
-            Wallet: class {
-                constructor(key: string) {
-                    if (!key || key.length < 66) {
-                        throw new Error('Invalid private key');
-                    }
-                }
-                address = '0x123';
-                privateKey = '0xkey';
-            },
+            Wallet: walletMock,
             HDNodeWallet: {
                 fromPhrase: vi.fn().mockReturnValue({
                     privateKey: '0xderivedkey123'
@@ -45,15 +45,15 @@ vi.mock('ethers', async () => {
 
 vi.mock('bip39', async () => {
     const actual = await vi.importActual('bip39');
+    const generateMnemonicMock = vi.fn((strength?: number) => {
+        if (actual && typeof (actual as any).generateMnemonic === 'function') {
+            return (actual as any).generateMnemonic(strength);
+        }
+        return 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+    });
     return {
         ...actual,
-        generateMnemonic: (strength?: number) => {
-            // Use actual implementation but ensure it returns a valid mnemonic
-            if (actual && typeof (actual as any).generateMnemonic === 'function') {
-                return (actual as any).generateMnemonic(strength);
-            }
-            return 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-        },
+        generateMnemonic: generateMnemonicMock,
         validateMnemonic: vi.fn().mockReturnValue(true),
         mnemonicToSeedSync: vi.fn(),
     };
@@ -108,9 +108,7 @@ describe('WalletService', () => {
         });
 
         it('should reject invalid private key', () => {
-            (ethers.Wallet as any).mockImplementationOnce(() => {
-                throw new Error('Invalid key');
-            });
+            // Wallet constructor already throws for invalid keys
             const isValid = WalletService.validatePrivateKey('invalid');
             expect(isValid).toBe(false);
         });

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { Mock } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { HashRouter } from 'react-router-dom';
 import Analytics from './Analytics';
@@ -7,6 +8,7 @@ import { WalletService } from '../services/wallet';
 import { NetworkService } from '../services/networks';
 import { ChainManager } from '../services/chains/manager';
 import { MarketService } from '../services/market';
+import { PreviewModeProvider } from '../contexts/PreviewModeContext';
 
 // Mock dependencies
 vi.mock('../services/storage');
@@ -29,24 +31,31 @@ describe('Analytics Page', () => {
     },
   ];
 
+  const mockChainManager = ChainManager as unknown as Mock;
+
   beforeEach(() => {
     vi.clearAllMocks();
     (StorageService.getMnemonic as any) = vi.fn().mockReturnValue('test mnemonic');
     (WalletService.getStoredPrivateKey as any) = vi.fn().mockReturnValue(null);
     (NetworkService.getEnabledNetworks as any) = vi.fn().mockReturnValue([]);
-    (ChainManager as any) = vi.fn().mockImplementation(() => ({
-      getAllServices: vi.fn().mockReturnValue(mockServices),
-    }));
+    mockChainManager.mockReset();
+    mockChainManager.mockImplementation(function () {
+      return {
+        getAllServices: vi.fn().mockReturnValue(mockServices),
+      };
+    });
     (MarketService.getPrices as any) = vi.fn().mockResolvedValue({
-      HYPE: { current_price: 10 },
-      BTC: { current_price: 60000 },
+      HYPE: { current_price: 10, price_change_percentage_24h: 0.5 },
+      BTC: { current_price: 60000, price_change_percentage_24h: -1.2 },
     });
   });
 
   const renderAnalytics = () => {
     return render(
       <HashRouter>
-        <Analytics />
+        <PreviewModeProvider>
+          <Analytics />
+        </PreviewModeProvider>
       </HashRouter>
     );
   };
@@ -86,9 +95,10 @@ describe('Analytics Page', () => {
 
     await waitFor(() => {
       expect(MarketService.getPrices).toHaveBeenCalled();
-    });
+    }, { timeout: 3000 });
   });
 });
+
 
 
 

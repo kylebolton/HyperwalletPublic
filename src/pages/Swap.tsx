@@ -7,6 +7,7 @@ import {
 import { ChainManager, SupportedChain } from "../services/chains/manager";
 import { NetworkService } from "../services/networks";
 import { WalletService } from "../services/wallet";
+import { TokenService, type TokenInfo } from "../services/tokens";
 import { usePreviewMode } from "../contexts/PreviewModeContext";
 import { PreviewDataService } from "../services/previewData";
 import { motion } from "framer-motion";
@@ -14,7 +15,7 @@ import { ArrowRightLeft, Shield, Wallet } from "lucide-react";
 
 export default function Swap() {
   const { isPreviewMode } = usePreviewMode();
-  const [from, setFrom] = useState("HYPEREVM");
+  const [from, setFrom] = useState("HYPE");
   const [to, setTo] = useState("XMR");
   const [amount, setAmount] = useState("");
   const [quote, setQuote] = useState<SwapQuote | null>(null);
@@ -31,6 +32,8 @@ export default function Swap() {
   const [loadingWalletAddress, setLoadingWalletAddress] = useState(false);
   const [walletInitStatus, setWalletInitStatus] = useState<string | null>(null);
   const [shieldProofEnabled, setShieldProofEnabled] = useState(false);
+  const [hyperEVMTokens, setHyperEVMTokens] = useState<TokenInfo[]>([]);
+  const [loadingTokens, setLoadingTokens] = useState(true);
 
   // Check if ZCash is involved (for Shield Swap branding)
   const isZCashSwap =
@@ -76,12 +79,12 @@ export default function Swap() {
           setQuote(null);
         }
       } else {
-        // Regular swap
+          // Regular swap
         if (isPreviewMode) {
           // Use preview market data for calculations
           const mockMarketData = PreviewDataService.getMockMarketData();
-          const fromSymbol = from.toUpperCase() === "HYPEREVM" ? "HYPE" : from;
-          const toSymbol = to.toUpperCase() === "HYPEREVM" ? "HYPE" : to;
+          const fromSymbol = from.toUpperCase();
+          const toSymbol = to.toUpperCase();
           const fromPrice = mockMarketData[from]?.current_price || mockMarketData[fromSymbol]?.current_price || 0;
           const toPrice = mockMarketData[to]?.current_price || mockMarketData[toSymbol]?.current_price || 1;
 
@@ -89,7 +92,7 @@ export default function Swap() {
             throw new Error(`Price for ${from} not found`);
           }
 
-          const isHyperEVMSwap = from.toUpperCase() === "HYPEREVM" || to.toUpperCase() === "HYPEREVM";
+          const isHyperEVMSwap = isHyperEVMToken(from) && isHyperEVMToken(to);
           const rate = fromPrice / toPrice;
           const amountNum = parseFloat(amount);
           
@@ -195,19 +198,90 @@ export default function Swap() {
     }
   };
 
-  const currencies = ["HYPEREVM", "BTC", "ETH", "SOL", "XMR", "ZEC"];
+  // Base chain currencies (non-HyperEVM)
+  const baseChains = ["BTC", "ETH", "SOL"];
+  const privacyCoins = ["XMR", "ZEC"];
+
+  // Load HyperEVM tokens
+  useEffect(() => {
+    const loadTokens = async () => {
+      if (isPreviewMode) {
+        const mockTokens = PreviewDataService.getMockHyperEVMTokens();
+        setHyperEVMTokens(mockTokens);
+        setLoadingTokens(false);
+        return;
+      }
+
+      try {
+        const activeWallet = WalletService.getActiveWallet();
+        if (!activeWallet) {
+          setLoadingTokens(false);
+          return;
+        }
+
+        const mnemonic = activeWallet.mnemonic;
+        const privKey = activeWallet.privateKey;
+
+        if (!mnemonic && !privKey) {
+          setLoadingTokens(false);
+          return;
+        }
+
+        const enabledNetworks = NetworkService.getEnabledNetworks();
+        const manager = new ChainManager(
+          privKey || undefined,
+          !!privKey,
+          mnemonic || undefined,
+          enabledNetworks
+        );
+
+        try {
+          const hypeService = manager.getService(SupportedChain.HYPEREVM);
+          const address = await hypeService.getAddress();
+          const tokens = await TokenService.getHyperEVMTokens(address, true);
+          setHyperEVMTokens(tokens);
+        } catch (e) {
+          // If HyperEVM not available, just set empty tokens
+          setHyperEVMTokens([]);
+        }
+      } catch (e) {
+        setHyperEVMTokens([]);
+      } finally {
+        setLoadingTokens(false);
+      }
+    };
+
+    loadTokens();
+  }, [isPreviewMode]);
+
+  // All available currencies (HyperEVM tokens + base chains + privacy coins)
+  const allCurrencies = [
+    ...hyperEVMTokens.map(t => t.symbol),
+    ...baseChains,
+    ...privacyCoins,
+  ];
 
   // Map currency symbol to chain key
   const getChainKey = (currency: string): SupportedChain | null => {
     const upper = currency.toUpperCase();
-    if (upper === "HYPEREVM" || upper === "HYPE")
+    
+    // Check if it's a HyperEVM token
+    if (hyperEVMTokens.some(t => t.symbol.toUpperCase() === upper)) {
       return SupportedChain.HYPEREVM;
+    }
+    
     if (upper === "BTC") return SupportedChain.BTC;
     if (upper === "ETH") return SupportedChain.ETH;
     if (upper === "SOL") return SupportedChain.SOL;
     if (upper === "XMR") return SupportedChain.XMR;
     if (upper === "ZEC") return SupportedChain.ZEC;
     return null;
+  };
+
+  // Check if currency is a HyperEVM token
+  const isHyperEVMToken = (currency: string): boolean => {
+    const upper = currency.toUpperCase();
+    return hyperEVMTokens.some(t => t.symbol.toUpperCase() === upper);
   };
 
   // Fetch wallet address for target currency
@@ -222,8 +296,10 @@ export default function Swap() {
       // In preview mode, use mock addresses
       if (isPreviewMode) {
         const mockAddresses = PreviewDataService.getMockAddresses();
-        const symbol = to.toUpperCase() === "HYPEREVM" ? "HYPE" : to;
-        setWalletAddress(mockAddresses[symbol] || mockAddresses[to] || "0x0000000000000000000000000000000000000000");
+        const symbol = to.toUpperCase();
+        // If it's a HyperEVM token, use HYPE address
+        const addressKey = isHyperEVMToken(to) ? "HYPE" : to;
+        setWalletAddress(mockAddresses[addressKey] || mockAddresses[symbol] || "0x0000000000000000000000000000000000000000");
         setLoadingWalletAddress(false);
         return;
       }
@@ -347,11 +423,7 @@ export default function Swap() {
 
   // Determine swap provider
   const swapProvider = quote?.provider || null;
-  const isHyperEVMSwap =
-    from.toUpperCase() === "HYPEREVM" ||
-    from.toUpperCase() === "HYPE" ||
-    to.toUpperCase() === "HYPEREVM" ||
-    to.toUpperCase() === "HYPE";
+  const isHyperEVMSwap = isHyperEVMToken(from) && isHyperEVMToken(to);
 
   return (
     <div className="space-y-8">
@@ -417,14 +489,39 @@ export default function Swap() {
                 onChange={e => {
                   setFrom(e.target.value);
                   setQuote(null);
+                  setShieldQuote(null);
                 }}
                 className="bg-[var(--bg-tertiary)] rounded-2xl px-6 py-4 font-bold text-[var(--text-primary)] border border-[var(--border-primary)] transition-colors cursor-pointer hover:bg-[var(--hover-bg)] min-w-[140px]"
               >
-                {currencies.map(c => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
+                {loadingTokens && hyperEVMTokens.length === 0 ? (
+                  <option>Loading...</option>
+                ) : (
+                  <>
+                    {hyperEVMTokens.length > 0 && (
+                      <optgroup label="HyperEVM Tokens">
+                        {hyperEVMTokens.map(token => (
+                          <option key={token.symbol} value={token.symbol}>
+                            {token.symbol}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    <optgroup label="Base Chains">
+                      {baseChains.map(c => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Privacy Coins">
+                      {privacyCoins.map(c => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </>
+                )}
               </select>
             </div>
           </div>
@@ -477,76 +574,103 @@ export default function Swap() {
                   setDestinationAddress("");
                   setAddressError(null);
                   setWalletInitStatus(null);
+                  setShieldProofEnabled(false);
                 }}
                 className="bg-[var(--bg-tertiary)] rounded-2xl px-6 py-4 font-bold text-[var(--text-primary)] border border-[var(--border-primary)] transition-colors cursor-pointer hover:bg-[var(--hover-bg)] min-w-[140px]"
               >
-                {currencies.map(c => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
+                {loadingTokens && hyperEVMTokens.length === 0 ? (
+                  <option>Loading...</option>
+                ) : (
+                  <>
+                    {hyperEVMTokens.length > 0 && (
+                      <optgroup label="HyperEVM Tokens">
+                        {hyperEVMTokens.map(token => (
+                          <option key={token.symbol} value={token.symbol}>
+                            {token.symbol}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    <optgroup label="Base Chains">
+                      {baseChains.map(c => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Privacy Coins">
+                      {privacyCoins.map(c => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </>
+                )}
               </select>
             </div>
           </div>
 
-          {/* Shield Proof Toggle */}
-          <div className="p-6 bg-[var(--bg-tertiary)] rounded-2xl border border-[var(--border-primary)] transition-colors">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Shield 
-                  size={20} 
-                  className={`transition-colors ${
-                    shieldProofEnabled 
-                      ? "text-hyper-green" 
-                      : "text-[var(--text-secondary)]"
-                  }`}
-                />
-                <div>
-                  <label className="text-sm font-bold text-[var(--text-primary)] block">
-                    Shield Proof
-                  </label>
-                  <p className="text-xs text-[var(--text-secondary)] mt-1">
-                    Enable zero-knowledge privacy protection for this swap
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShieldProofEnabled(!shieldProofEnabled)}
-                className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-hyper-green focus:ring-offset-2 ${
-                  shieldProofEnabled
-                    ? "bg-hyper-green"
-                    : "bg-[var(--bg-secondary)] border border-[var(--border-primary)]"
-                }`}
-              >
-                <span
-                  className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                    shieldProofEnabled ? "translate-x-6" : "translate-x-1"
-                  }`}
-                />
-              </button>
-            </div>
-            {shieldProofEnabled && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                className="mt-4 pt-4 border-t border-[var(--border-primary)]"
-              >
-                <div className="flex items-start gap-2">
-                  <Shield size={16} className="text-hyper-green mt-0.5 flex-shrink-0" />
-                  <div className="text-xs text-[var(--text-secondary)] leading-relaxed">
-                    <p className="font-medium text-[var(--text-primary)] mb-1">
-                      Privacy Protection Active
-                    </p>
-                    <p>
-                      Your swap transaction will be protected with zero-knowledge proofs, 
-                      ensuring your transaction amounts and addresses remain private.
+          {/* Shield Proof Toggle - Only show for ZEC swaps */}
+          {(from.toUpperCase() === "ZEC" || to.toUpperCase() === "ZEC") && (
+            <div className="p-6 bg-[var(--bg-tertiary)] rounded-2xl border border-[var(--border-primary)] transition-colors">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Shield 
+                    size={20} 
+                    className={`transition-colors ${
+                      shieldProofEnabled 
+                        ? "text-hyper-green" 
+                        : "text-[var(--text-secondary)]"
+                    }`}
+                  />
+                  <div>
+                    <label className="text-sm font-bold text-[var(--text-primary)] block">
+                      Shield Proof (ZEC Only)
+                    </label>
+                    <p className="text-xs text-[var(--text-secondary)] mt-1">
+                      Enable zero-knowledge privacy protection - available only for ZCash swaps
                     </p>
                   </div>
                 </div>
-              </motion.div>
-            )}
-          </div>
+                <button
+                  onClick={() => setShieldProofEnabled(!shieldProofEnabled)}
+                  className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-hyper-green focus:ring-offset-2 ${
+                    shieldProofEnabled
+                      ? "bg-hyper-green"
+                      : "bg-[var(--bg-secondary)] border border-[var(--border-primary)]"
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                      shieldProofEnabled ? "translate-x-6" : "translate-x-1"
+                    }`}
+                  />
+                </button>
+              </div>
+              {shieldProofEnabled && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="mt-4 pt-4 border-t border-[var(--border-primary)]"
+                >
+                  <div className="flex items-start gap-2">
+                    <Shield size={16} className="text-hyper-green mt-0.5 flex-shrink-0" />
+                    <div className="text-xs text-[var(--text-secondary)] leading-relaxed">
+                      <p className="font-medium text-[var(--text-primary)] mb-1">
+                        ZCash Shield Swap Active
+                      </p>
+                      <p>
+                        Your ZCash swap transaction will be protected with zero-knowledge proofs, 
+                        ensuring your transaction amounts and addresses remain private. This feature is only available for ZCash (ZEC).
+                      </p>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </div>
+          )}
 
           {/* Destination Address Section */}
           {(quote || shieldQuote) && (
@@ -748,8 +872,8 @@ export default function Swap() {
             {!quote && !isZCashSwap && !loading && (
               <p className="text-xs text-center text-[var(--text-secondary)]">
                 {isHyperEVMSwap
-                  ? "HyperEVM swaps use HyperSwap for direct on-chain execution"
-                  : "Swaps are processed via SwapZone for the best rates"}
+                  ? "HyperEVM token swaps use HyperSwap for direct on-chain execution"
+                  : "Cross-chain swaps are processed via SwapZone for the best rates"}
               </p>
             )}
             {isZCashSwap && !quote && !shieldQuote && (

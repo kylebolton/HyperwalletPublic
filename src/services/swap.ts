@@ -34,19 +34,28 @@ export class SwapService {
   }
 
   /**
-   * Get swap quote - routes to HyperSwap for HyperEVM swaps, SwapZone for others
+   * Check if a symbol is a HyperEVM token
+   */
+  private static isHyperEVMToken(symbol: string): boolean {
+    const upper = symbol.toUpperCase();
+    // Common HyperEVM tokens (this list should match TokenService)
+    const hyperEVMTokens = [
+      "HYPE", "USDT", "USDC", "DAI", "WBTC", "WETH", "UNI", "LINK", "AAVE", "WHYPE"
+    ];
+    return hyperEVMTokens.includes(upper);
+  }
+
+  /**
+   * Get swap quote - routes to HyperSwap for HyperEVM token swaps, SwapZone for cross-chain swaps
    */
   static async getQuote(
     from: string,
     to: string,
     amount: string
   ): Promise<SwapQuote> {
-    // Check if this is a HyperEVM swap (either from or to is HYPEREVM)
+    // Check if this is a HyperEVM token swap (both from and to are HyperEVM tokens)
     const isHyperEVMSwap =
-      from.toUpperCase() === "HYPEREVM" ||
-      from.toUpperCase() === "HYPE" ||
-      to.toUpperCase() === "HYPEREVM" ||
-      to.toUpperCase() === "HYPE";
+      this.isHyperEVMToken(from) && this.isHyperEVMToken(to);
 
     if (isHyperEVMSwap) {
       // Use HyperSwap for HyperEVM swaps
@@ -194,10 +203,7 @@ export class SwapService {
     // Check if this is a HyperEVM swap
     const isHyperEVMSwap =
       quote.provider === "hyperswap" ||
-      quote.fromCurrency.toUpperCase() === "HYPEREVM" ||
-      quote.fromCurrency.toUpperCase() === "HYPE" ||
-      quote.toCurrency.toUpperCase() === "HYPEREVM" ||
-      quote.toCurrency.toUpperCase() === "HYPE";
+      (this.isHyperEVMToken(quote.fromCurrency) && this.isHyperEVMToken(quote.toCurrency));
 
     if (isHyperEVMSwap) {
       // Use HyperSwap for HyperEVM swaps

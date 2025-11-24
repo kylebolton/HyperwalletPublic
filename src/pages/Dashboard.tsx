@@ -6,7 +6,7 @@ import { NetworkService } from "../services/networks";
 import { TokenService, type TokenInfo } from "../services/tokens";
 import { MarketService, type MarketData } from "../services/market";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowUpRight, ArrowDownLeft, ChevronDown, ChevronUp } from "lucide-react";
+import { ArrowUpRight, ArrowDownLeft, ChevronDown, ChevronUp, Shield } from "lucide-react";
 import ReceiveModal from "../components/ReceiveModal";
 import SendModal from "../components/SendModal";
 import AssetLogo from "../components/AssetLogo";
@@ -28,6 +28,8 @@ interface AssetCardProps {
   onSend: () => void;
   onReceive: () => void;
   index: number;
+  isPrivacyCoin?: boolean;
+  hasShieldSwap?: boolean; // For ZEC only
   marketData?: Record<string, MarketData>;
 }
 
@@ -39,6 +41,8 @@ function AssetCard({
   onSend,
   onReceive,
   index,
+  isPrivacyCoin = false,
+  hasShieldSwap = false,
   marketData,
 }: AssetCardProps) {
   // Calculate USD value
@@ -68,8 +72,21 @@ function AssetCard({
     >
       <div className="flex items-center gap-4 min-w-[200px] flex-shrink-0">
         <AssetLogo symbol={asset.symbol} size={48} />
-        <div>
-          <div className="font-bold text-lg">{asset.name}</div>
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <div className="font-bold text-lg">{asset.name}</div>
+            {isPrivacyCoin && (
+              <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 dark:text-purple-300 text-xs font-bold rounded-full border border-purple-500/30">
+                PRIVACY
+              </span>
+            )}
+            {hasShieldSwap && (
+              <span className="px-2 py-0.5 bg-hyper-green/20 text-hyper-green text-xs font-bold rounded-full border border-hyper-green/30 flex items-center gap-1">
+                <Shield size={12} />
+                SHIELD SWAP
+              </span>
+            )}
+          </div>
           <div className="text-[var(--text-secondary)] text-sm font-mono">
             {asset.symbol}
           </div>
@@ -273,19 +290,14 @@ export default function Dashboard() {
               if ('init' in service && typeof service.init === 'function') {
                 try {
                   await service.init();
-                  console.log(`${service.symbol}: Wallet initialized successfully`);
                 } catch (initError: any) {
-                  console.warn(`${service.symbol}: Wallet initialization failed:`, initError);
+                  // Suppress warning during sync - it will be shown after sync completes if needed
                   // Continue anyway - some services can still work without init
                 }
               }
 
               // Fetch address first - this will validate the address
               const addr = await service.getAddress();
-              console.log(
-                `Successfully loaded address for ${service.symbol}:`,
-                addr
-              );
               newAddresses[service.symbol] = addr;
 
               const bal = await service.getBalance();
@@ -327,7 +339,7 @@ export default function Dashboard() {
             ),
           ]);
         } catch (e) {
-          console.warn("Load operation timed out or failed:", e);
+          // Suppress warning during sync - will be shown after sync completes if needed
           // Clear all loading states on timeout - ensure all services are removed
           if (isMounted) {
             setLoadingAssets(prev => {
@@ -440,7 +452,7 @@ export default function Dashboard() {
               try {
                 await hyperEVMService.init();
               } catch (initError) {
-                console.warn("HyperEVM initialization failed:", initError);
+                // Suppress warning during sync - will be shown after sync completes if needed
                 // Continue anyway
               }
             }
@@ -504,8 +516,8 @@ export default function Dashboard() {
     }
   }, [balances, calculateTotalBalance]);
 
-  // Build base assets (non-HyperEVM chains)
-  const baseAssets: Asset[] = [
+  // Build base assets (non-HyperEVM chains) - separated into regular chains and privacy coins
+  const baseChains: Asset[] = [
     {
       symbol: "BTC",
       name: "Bitcoin",
@@ -524,6 +536,10 @@ export default function Dashboard() {
       color: "#9945FF",
       chainKey: SupportedChain.SOL,
     },
+  ];
+
+  // Privacy coins
+  const privacyCoins: Asset[] = [
     {
       symbol: "XMR",
       name: "Monero",
@@ -759,8 +775,8 @@ export default function Dashboard() {
           </motion.div>
         )}
 
-        {/* Base Assets */}
-        {baseAssets.map((asset, i) => (
+        {/* Base Chains */}
+        {baseChains.map((asset, i) => (
           <AssetCard
             key={asset.symbol}
             asset={asset}
@@ -768,6 +784,7 @@ export default function Dashboard() {
             address={addresses[asset.symbol]}
             isLoading={loadingAssets.has(asset.symbol)}
             marketData={marketData}
+            index={i}
             onSend={() =>
               setSendModal({
                 isOpen: true,
@@ -884,6 +901,153 @@ export default function Dashboard() {
             index={i}
           />
         ))}
+
+        {/* Privacy Coins Section */}
+        {privacyCoins.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-2xl border border-[var(--border-primary)] bg-[var(--bg-secondary)] overflow-hidden transition-colors"
+          >
+            {/* Category Header */}
+            <div className="w-full flex items-center justify-between p-4">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-full bg-purple-500/20 flex items-center justify-center">
+                  <Shield size={24} className="text-purple-400" />
+                </div>
+                <div className="text-left">
+                  <div className="font-bold text-lg">Privacy Coins</div>
+                  <div className="text-xs text-[var(--text-secondary)]">
+                    {privacyCoins.length} coin{privacyCoins.length !== 1 ? "s" : ""}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Privacy Coins List */}
+            <div className="border-t border-[var(--border-primary)] divide-y divide-[var(--border-primary)]">
+              {privacyCoins.map((asset, i) => (
+                <AssetCard
+                  key={asset.symbol}
+                  asset={asset}
+                  balance={balances[asset.symbol]}
+                  address={addresses[asset.symbol]}
+                  isLoading={loadingAssets.has(asset.symbol)}
+                  marketData={marketData}
+                  isPrivacyCoin={true}
+                  hasShieldSwap={asset.symbol === "ZEC"}
+                  onSend={() =>
+                    setSendModal({
+                      isOpen: true,
+                      symbol: asset.symbol,
+                      chainKey: asset.chainKey,
+                    })
+                  }
+                  onReceive={async () => {
+                    let address = addresses[asset.symbol];
+                    if (!address || address === "Address Error") {
+                      setReceiveModal({
+                        isOpen: true,
+                        symbol: asset.symbol,
+                        address: "",
+                        loading: true,
+                      });
+
+                      try {
+                        const activeWallet = WalletService.getActiveWallet();
+                        if (!activeWallet) {
+                          setReceiveModal(prev => ({
+                            ...prev,
+                            loading: false,
+                            address: "No wallet",
+                          }));
+                          return;
+                        }
+
+                        const mnemonic = activeWallet.mnemonic;
+                        const privKey = activeWallet.privateKey;
+
+                        if (!mnemonic && !privKey) {
+                          setReceiveModal(prev => ({
+                            ...prev,
+                            loading: false,
+                            address: "No credentials",
+                          }));
+                          return;
+                        }
+
+                        const enabledNetworks = NetworkService.getEnabledNetworks();
+                        const manager = new ChainManager(
+                          privKey || undefined,
+                          !!privKey,
+                          mnemonic || undefined,
+                          enabledNetworks
+                        );
+
+                        const service = manager.getService(asset.chainKey);
+                        
+                        // Check if service has init method and initialize if needed
+                        if ('init' in service && typeof service.init === 'function') {
+                          setReceiveModal(prev => ({
+                            ...prev,
+                            address: `Initializing ${asset.name} wallet...`,
+                            loading: true,
+                          }));
+                          
+                          try {
+                            await service.init();
+                            setReceiveModal(prev => ({
+                              ...prev,
+                              address: `${asset.name} wallet initialized successfully!`,
+                              loading: true,
+                            }));
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+                          } catch (initError: any) {
+                            setReceiveModal(prev => ({
+                              ...prev,
+                              address: `Initialization failed: ${initError.message || 'Unknown error'}`,
+                              loading: false,
+                            }));
+                            return;
+                          }
+                        }
+                        
+                        setReceiveModal(prev => ({
+                          ...prev,
+                          address: "Getting address...",
+                          loading: true,
+                        }));
+                        
+                        address = await service.getAddress();
+
+                        setAddresses(prev => ({
+                          ...prev,
+                          [asset.symbol]: address,
+                        }));
+                      } catch (e) {
+                        address = "Address Error";
+                      }
+
+                      setReceiveModal(prev => ({
+                        ...prev,
+                        address: address || "Address Error",
+                        loading: false,
+                      }));
+                    } else {
+                      setReceiveModal({
+                        isOpen: true,
+                        symbol: asset.symbol,
+                        address: address,
+                        loading: false,
+                      });
+                    }
+                  }}
+                  index={i}
+                />
+              ))}
+            </div>
+          </motion.div>
+        )}
       </div>
 
       <ReceiveModal

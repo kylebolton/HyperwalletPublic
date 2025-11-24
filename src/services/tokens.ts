@@ -271,7 +271,7 @@ export class TokenService {
       };
     } catch (e: any) {
       console.error("Failed to add custom token:", e);
-      throw new Error(`Failed to add token: ${e.message}`);
+      return null;
     }
   }
 }
