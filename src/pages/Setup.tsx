@@ -16,15 +16,33 @@ export default function Setup({ onComplete }: { onComplete: () => void }) {
   const [importInput, setImportInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [existingWallets, setExistingWallets] = useState<Wallet[]>([]);
+  const [walletNameError, setWalletNameError] = useState<string | null>(null);
 
   useEffect(() => {
     const wallets = WalletService.getAllWallets();
     setExistingWallets(wallets);
   }, []);
 
+  const validateWalletName = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setWalletNameError("Wallet name is required");
+      return false;
+    }
+    if (trimmed.length < 2) {
+      setWalletNameError("Wallet name must be at least 2 characters");
+      return false;
+    }
+    if (trimmed.length > 50) {
+      setWalletNameError("Wallet name must be 50 characters or less");
+      return false;
+    }
+    setWalletNameError(null);
+    return true;
+  };
+
   const handleCreate = async () => {
-    if (!walletName.trim()) {
-      setError("Please enter a wallet name");
+    if (!validateWalletName(walletName)) {
       return;
     }
 
@@ -33,6 +51,7 @@ export default function Setup({ onComplete }: { onComplete: () => void }) {
       setMnemonic(newWallet.mnemonic || "");
       setStep("create");
       setError(null);
+      setWalletNameError(null);
     } catch (e: any) {
       setError(e.message || "Failed to create wallet");
     }
@@ -141,7 +160,8 @@ export default function Setup({ onComplete }: { onComplete: () => void }) {
 
             <button
               onClick={handleCreate}
-              className="w-full py-5 bg-[var(--text-primary)] text-[var(--bg-primary)] rounded-2xl font-bold text-lg hover:scale-105 transition-transform"
+              disabled={!!walletNameError || !walletName.trim()}
+              className="w-full py-5 bg-[var(--text-primary)] text-[var(--bg-primary)] rounded-2xl font-bold text-lg hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Create New Wallet
             </button>
@@ -245,7 +265,7 @@ export default function Setup({ onComplete }: { onComplete: () => void }) {
 
             <button
               onClick={handleImport}
-              disabled={!importInput || !walletName.trim()}
+              disabled={!importInput || !walletName.trim() || !!walletNameError}
               className="w-full py-5 bg-[var(--text-primary)] text-[var(--bg-primary)] rounded-2xl font-bold text-lg hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Import Wallet

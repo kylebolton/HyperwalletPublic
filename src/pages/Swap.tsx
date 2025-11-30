@@ -38,8 +38,9 @@ export default function Swap() {
   // Check if ZCash is involved (for Shield Swap branding)
   const isZCashSwap =
     from.toUpperCase() === "ZEC" || to.toUpperCase() === "ZEC";
-  const isShieldSwap =
-    isZCashSwap && (from.toUpperCase() === "ZEC" || to.toUpperCase() === "ZEC");
+  const isZECToZEC = from.toUpperCase() === "ZEC" && to.toUpperCase() === "ZEC";
+  // Shield swap is enabled when shield proof is enabled OR it's a ZEC-to-ZEC swap
+  const isShieldSwap = isZCashSwap && (shieldProofEnabled || isZECToZEC);
 
   const handleGetQuote = async () => {
     if (!amount) return;
@@ -48,19 +49,18 @@ export default function Swap() {
 
     try {
       // Handle shield swap for ZCash
-      if (
-        isShieldSwap &&
-        (from.toUpperCase() === "ZEC" || to.toUpperCase() === "ZEC")
-      ) {
+      if (isShieldSwap) {
         if (isPreviewMode) {
           // Mock shield swap quote for preview mode
           const fee = (parseFloat(amount) * 0.001).toFixed(8);
+          const amountNum = parseFloat(amount);
+          const netAmount = (amountNum - parseFloat(fee)).toFixed(8);
           const mockQuote: ShieldSwapQuote = {
-            fromAddress: "t1MockAddress123456789",
-            toAddress: "t1MockAddress123456789",
+            fromAddress: shieldMode === "transparent" ? "t1MockAddress123456789" : "z1MockShieldedAddress123456789012345678901234567890123456789012345678901234567890123456789",
+            toAddress: shieldMode === "transparent" ? "z1MockShieldedAddress123456789012345678901234567890123456789012345678901234567890123456789" : "t1MockAddress123456789",
             fromType: shieldMode === "transparent" ? "transparent" : "shielded",
             toType: shieldMode === "transparent" ? "shielded" : "transparent",
-            amount: (parseFloat(amount) - parseFloat(fee)).toFixed(8),
+            amount: netAmount,
             fee: fee,
           };
           setShieldQuote(mockQuote);
@@ -131,7 +131,12 @@ export default function Swap() {
       }
     } catch (e: any) {
       console.error("Quote failed:", e);
-      setSwapStatus(`Error: ${e.message || "Failed to get quote"}`);
+      const errorMsg = e.message || "Failed to get quote";
+      if (isShieldSwap && errorMsg.includes("mnemonic required")) {
+        setSwapStatus(`Error: Wallet mnemonic required for ZCash shield swaps. Please ensure your wallet is properly initialized.`);
+      } else {
+        setSwapStatus(`Error: ${errorMsg}`);
+      }
       setQuote(null);
       setShieldQuote(null);
     } finally {
@@ -161,7 +166,11 @@ export default function Swap() {
       setLoading(true);
       setTimeout(() => {
         if (shieldQuote) {
-          setSwapStatus(`Preview: Shield swap would execute! Amount: ${shieldQuote.amount} ${to}, Fee: ${shieldQuote.fee} ZEC`);
+          setSwapStatus(
+            `Preview: Shield swap would execute! ` +
+            `You would receive ${shieldQuote.amount} ZEC (net after ${shieldQuote.fee} ZEC fee) ` +
+            `via ${shieldQuote.fromType === "transparent" ? "T → Z" : "Z → T"} conversion.`
+          );
         } else if (quote) {
           setSwapStatus(`Preview: Swap would execute! You would receive ${quote.amountOut} ${to} for ${quote.amountIn} ${from}`);
         }
@@ -173,6 +182,7 @@ export default function Swap() {
     if (shieldQuote) {
       // Handle shield swap
       setLoading(true);
+      setSwapStatus("Executing shield swap...");
       try {
         const res = await ZCashShieldService.executeShieldSwap(
           shieldQuote,
@@ -180,7 +190,16 @@ export default function Swap() {
         );
         setSwapStatus(`Shield swap initiated! Transaction: ${res.txHash}`);
       } catch (e: any) {
-        setSwapStatus(`Shield swap error: ${e.message}`);
+        const errorMsg = e.message || "Unknown error";
+        if (errorMsg.includes("currently in development")) {
+          setSwapStatus(
+            `Shield swap execution is not yet available. ` +
+            `This feature requires ZCash full node integration and is currently in development. ` +
+            `Preview mode is available for testing the flow.`
+          );
+        } else {
+          setSwapStatus(`Shield swap error: ${errorMsg}`);
+        }
       }
       setLoading(false);
       return;
@@ -188,11 +207,12 @@ export default function Swap() {
 
     if (!quote) return;
     setLoading(true);
+    setSwapStatus("Creating swap transaction...");
     try {
       const res = await SwapService.createSwap(quote, destAddress);
-      setSwapStatus(`Swap initiated! Deposit to: ${res.depositAddress}`);
+      setSwapStatus(`Swap initiated! Deposit to: ${res.depositAddress}${res.txHash ? ` | TX: ${res.txHash}` : ""}`);
     } catch (e: any) {
-      setSwapStatus(`Swap error: ${e.message}`);
+      setSwapStatus(`Swap error: ${e.message || "Failed to create swap"}`);
     } finally {
       setLoading(false);
     }
@@ -407,11 +427,33 @@ export default function Swap() {
         const service = manager.getService(chainKey);
         const isValid = service.validateAddress(destinationAddress);
 
-        if (isValid) {
-          setAddressError(null);
-        } else {
+        if (!isValid) {
           setAddressError(`Invalid ${to} address format`);
+          return;
         }
+
+        // For ZEC shield swaps, validate address type matches expected type
+        if (isShieldSwap && to.toUpperCase() === "ZEC") {
+          const addressType = ZCashShieldService.getAddressType(destinationAddress);
+          const expectedType = shieldMode === "transparent" ? "shielded" : "transparent";
+          
+          if (addressType === "unknown") {
+            setAddressError("Invalid ZCash address format");
+            return;
+          }
+
+          if (addressType !== expectedType) {
+            const expectedTypeName = expectedType === "shielded" ? "shielded (z-address)" : "transparent (t-address)";
+            const actualTypeName = addressType === "shielded" ? "shielded (z-address)" : "transparent (t-address)";
+            setAddressError(
+              `Address type mismatch: Expected ${expectedTypeName} but got ${actualTypeName}. ` +
+              `For ${shieldMode === "transparent" ? "T → Z" : "Z → T"} swap, destination must be ${expectedTypeName}.`
+            );
+            return;
+          }
+        }
+
+        setAddressError(null);
       } catch (e: any) {
         setAddressError(`Validation error: ${e.message}`);
       }
@@ -419,7 +461,7 @@ export default function Swap() {
 
     const timeoutId = setTimeout(validateAddress, 500);
     return () => clearTimeout(timeoutId);
-  }, [destinationAddress, to, useCustomDestination]);
+  }, [destinationAddress, to, useCustomDestination, isShieldSwap, shieldMode]);
 
   // Determine swap provider
   const swapProvider = quote?.provider || null;
@@ -476,13 +518,23 @@ export default function Swap() {
             </label>
             <div className="flex gap-3 items-center">
               <div className="flex-1">
-                <input
-                  type="number"
-                  value={amount}
-                  onChange={e => setAmount(e.target.value)}
-                  className="w-full text-4xl font-bold outline-none placeholder-[var(--text-tertiary)] text-[var(--text-primary)] bg-transparent transition-colors"
-                  placeholder="0.00"
-                />
+                  <input
+                    type="number"
+                    value={amount}
+                    onChange={e => {
+                      const value = e.target.value;
+                      if (value === "" || (!isNaN(parseFloat(value)) && parseFloat(value) >= 0)) {
+                        setAmount(value);
+                        setQuote(null);
+                        setShieldQuote(null);
+                        setSwapStatus(null);
+                      }
+                    }}
+                    min="0"
+                    step="any"
+                    className="w-full text-4xl font-bold outline-none placeholder-[var(--text-tertiary)] text-[var(--text-primary)] bg-transparent transition-colors"
+                    placeholder="0.00"
+                  />
               </div>
               <select
                 value={from}
@@ -490,6 +542,8 @@ export default function Swap() {
                   setFrom(e.target.value);
                   setQuote(null);
                   setShieldQuote(null);
+                  setShieldProofEnabled(false);
+                  setShieldMode("transparent");
                 }}
                 className="bg-[var(--bg-tertiary)] rounded-2xl px-6 py-4 font-bold text-[var(--text-primary)] border border-[var(--border-primary)] transition-colors cursor-pointer hover:bg-[var(--hover-bg)] min-w-[140px]"
               >
@@ -548,17 +602,23 @@ export default function Swap() {
           {/* To Section */}
           <div className="space-y-3">
             <label className="text-sm font-bold text-[var(--text-secondary)] uppercase tracking-wide">
-              To {quote && "(Estimated)"}
+              To {quote && "(Estimated)"} {shieldQuote && "(Shield Swap)"}
             </label>
             <div className="flex gap-3 items-center">
               <div className="flex-1">
                 <div className="text-4xl font-bold text-[var(--text-primary)] min-h-[3rem] flex items-center">
                   {loading ? (
-                    <div className="h-12 w-32 bg-[var(--bg-tertiary)] rounded animate-pulse"></div>
+                    <div className="flex items-center gap-2">
+                      <div className="h-12 w-32 bg-[var(--bg-tertiary)] rounded animate-pulse"></div>
+                      <div className="w-5 h-5 border-2 border-[var(--text-secondary)] border-t-transparent rounded-full animate-spin"></div>
+                    </div>
                   ) : quote ? (
                     quote.amountOut
                   ) : shieldQuote ? (
-                    shieldQuote.amount
+                    <span className="flex items-center gap-2">
+                      {shieldQuote.amount}
+                      <Shield size={20} className="text-blue-500" />
+                    </span>
                   ) : (
                     "0.00"
                   )}
@@ -634,7 +694,12 @@ export default function Swap() {
                   </div>
                 </div>
                 <button
-                  onClick={() => setShieldProofEnabled(!shieldProofEnabled)}
+                  onClick={() => {
+                    setShieldProofEnabled(!shieldProofEnabled);
+                    setQuote(null);
+                    setShieldQuote(null);
+                    setSwapStatus(null);
+                  }}
                   className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-hyper-green focus:ring-offset-2 ${
                     shieldProofEnabled
                       ? "bg-hyper-green"
@@ -663,7 +728,7 @@ export default function Swap() {
                       </p>
                       <p>
                         Your ZCash swap transaction will be protected with zero-knowledge proofs, 
-                        ensuring your transaction amounts and addresses remain private. This feature is only available for ZCash (ZEC).
+                        ensuring your transaction amounts and addresses remain private. Select the shield swap direction below, then click "Get Quote".
                       </p>
                     </div>
                   </div>
@@ -844,6 +909,7 @@ export default function Swap() {
               disabled={
                 loading ||
                 !amount ||
+                parseFloat(amount) <= 0 ||
                 (quote || shieldQuote
                   ? useCustomDestination
                     ? !destinationAddress || !!addressError
@@ -869,14 +935,19 @@ export default function Swap() {
                 </>
               )}
             </button>
-            {!quote && !isZCashSwap && !loading && (
+            {!quote && !shieldQuote && !isZCashSwap && !loading && (
               <p className="text-xs text-center text-[var(--text-secondary)]">
                 {isHyperEVMSwap
                   ? "HyperEVM token swaps use HyperSwap for direct on-chain execution"
                   : "Cross-chain swaps are processed via SwapZone for the best rates"}
               </p>
             )}
-            {isZCashSwap && !quote && !shieldQuote && (
+            {!quote && !shieldQuote && isZCashSwap && !loading && shieldProofEnabled && (
+              <p className="text-xs text-center text-[var(--text-secondary)]">
+                Select shield swap direction above, then click "Get Quote" to proceed with your private ZCash transaction
+              </p>
+            )}
+            {isZCashSwap && !quote && !shieldQuote && shieldProofEnabled && (
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -885,7 +956,7 @@ export default function Swap() {
                 <div className="p-6 bg-blue-50 dark:bg-blue-950 rounded-2xl border border-blue-200 dark:border-blue-800 transition-colors">
                   <div className="flex items-center justify-between mb-4">
                     <span className="text-sm font-bold text-blue-900 dark:text-blue-400 uppercase tracking-wide">
-                      Shield Swap Mode
+                      Shield Swap Direction
                     </span>
                     <Shield
                       size={20}
@@ -894,20 +965,28 @@ export default function Swap() {
                   </div>
                   <div className="flex gap-3">
                     <button
-                      onClick={() => setShieldMode("transparent")}
-                      className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold transition-colors ${
+                      onClick={() => {
+                        setShieldMode("transparent");
+                        setQuote(null);
+                        setShieldQuote(null);
+                      }}
+                      className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold transition-all ${
                         shieldMode === "transparent"
-                          ? "bg-blue-600 text-white shadow-lg"
+                          ? "bg-blue-600 text-white shadow-lg ring-2 ring-blue-400"
                           : "bg-[var(--bg-primary)] text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900"
                       }`}
                     >
                       T → Z (Shield)
                     </button>
                     <button
-                      onClick={() => setShieldMode("shielded")}
-                      className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold transition-colors ${
+                      onClick={() => {
+                        setShieldMode("shielded");
+                        setQuote(null);
+                        setShieldQuote(null);
+                      }}
+                      className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold transition-all ${
                         shieldMode === "shielded"
-                          ? "bg-blue-600 text-white shadow-lg"
+                          ? "bg-blue-600 text-white shadow-lg ring-2 ring-blue-400"
                           : "bg-[var(--bg-primary)] text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900"
                       }`}
                     >
@@ -916,13 +995,23 @@ export default function Swap() {
                   </div>
                   <p className="text-xs text-blue-700 dark:text-blue-400 mt-3 leading-relaxed">
                     {shieldMode === "transparent"
-                      ? "Convert transparent (t-address) to shielded (z-address) for privacy"
-                      : "Convert shielded (z-address) to transparent (t-address)"}
+                      ? "Convert transparent (t-address) to shielded (z-address) for enhanced privacy"
+                      : "Convert shielded (z-address) to transparent (t-address) for compatibility"}
                   </p>
                 </div>
                 <p className="text-xs text-center text-[var(--text-secondary)]">
-                  Shield Swap enables private ZCash transactions between
-                  transparent and shielded addresses
+                  Select the direction for your shield swap, then click "Get Quote" to proceed
+                </p>
+              </motion.div>
+            )}
+            {isZCashSwap && !quote && !shieldQuote && !shieldProofEnabled && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-4 bg-blue-50 dark:bg-blue-950 rounded-2xl border border-blue-200 dark:border-blue-800 transition-colors"
+              >
+                <p className="text-xs text-center text-blue-700 dark:text-blue-400 leading-relaxed">
+                  Enable Shield Proof above to use private ZCash shield swaps, or click "Get Quote" for a regular ZCash swap
                 </p>
               </motion.div>
             )}
@@ -930,32 +1019,46 @@ export default function Swap() {
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="p-6 bg-blue-50 dark:bg-blue-950 rounded-2xl space-y-4 text-[var(--text-primary)] border border-blue-200 dark:border-blue-800 transition-colors"
+                className="p-6 bg-blue-50 dark:bg-blue-950 rounded-2xl space-y-4 text-[var(--text-primary)] border-2 border-blue-300 dark:border-blue-700 transition-colors"
               >
                 <div className="flex items-center justify-between pb-4 border-b border-blue-300 dark:border-blue-700">
-                  <span className="text-sm font-bold text-blue-900 dark:text-blue-400 uppercase tracking-wide">Shield Swap</span>
-                  <div className="px-4 py-2 bg-blue-600 text-white rounded-xl font-bold text-sm flex items-center gap-2">
+                  <span className="text-sm font-bold text-blue-900 dark:text-blue-400 uppercase tracking-wide flex items-center gap-2">
+                    <Shield size={18} />
+                    Shield Swap Quote
+                  </span>
+                  <div className="px-4 py-2 bg-blue-600 text-white rounded-xl font-bold text-sm flex items-center gap-2 shadow-lg">
                     <Shield size={16} />
                     {shieldQuote.fromType === "transparent" ? "T → Z" : "Z → T"}
                   </div>
                 </div>
-                <div className="flex items-center justify-between py-2">
-                  <span className="text-sm font-bold text-blue-800 dark:text-blue-400">Amount</span>
-                  <span className="font-bold text-lg">{shieldQuote.amount} ZEC</span>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between py-2 bg-blue-100 dark:bg-blue-900 rounded-lg px-3">
+                    <span className="text-sm font-bold text-blue-900 dark:text-blue-300">Input Amount</span>
+                    <span className="font-bold text-lg text-blue-900 dark:text-blue-100">{amount} ZEC</span>
+                  </div>
+                  <div className="flex items-center justify-between py-2">
+                    <span className="text-sm font-bold text-blue-800 dark:text-blue-400">Shield Fee (0.1%)</span>
+                    <span className="font-bold text-lg text-blue-900 dark:text-blue-300">-{shieldQuote.fee} ZEC</span>
+                  </div>
+                  <div className="flex items-center justify-between py-3 pt-3 border-t-2 border-blue-300 dark:border-blue-700">
+                    <span className="text-sm font-bold text-blue-900 dark:text-blue-300 uppercase tracking-wide">Net Amount (After Fee)</span>
+                    <span className="font-bold text-xl text-blue-900 dark:text-blue-100">{shieldQuote.amount} ZEC</span>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between py-2">
-                  <span className="text-sm font-bold text-blue-800 dark:text-blue-400">Shield Fee</span>
-                  <span className="font-bold text-lg">{shieldQuote.fee} ZEC</span>
-                </div>
-                <div className="pt-4 border-t border-blue-300 dark:border-blue-700">
-                  <p className="text-xs text-blue-700 dark:text-blue-400 leading-relaxed">
-                    Shield swap fee (0.1%) enables private transaction
-                    conversion. Your funds will be{" "}
-                    {shieldQuote.toType === "shielded"
-                      ? "shielded"
-                      : "unshielded"}
-                    .
-                  </p>
+                <div className="pt-4 border-t border-blue-300 dark:border-blue-700 bg-blue-100 dark:bg-blue-900 rounded-lg p-3">
+                  <div className="flex items-start gap-2">
+                    <Shield size={16} className="text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+                    <div className="text-xs text-blue-700 dark:text-blue-300 leading-relaxed">
+                      <p className="font-medium text-blue-900 dark:text-blue-200 mb-1">
+                        Your funds will be {shieldQuote.toType === "shielded" ? "shielded" : "unshielded"}
+                      </p>
+                      <p>
+                        Shield swap fee (0.1%) enables private transaction conversion between{" "}
+                        {shieldQuote.fromType === "transparent" ? "transparent and shielded" : "shielded and transparent"}{" "}
+                        addresses. This ensures your transaction amounts and addresses remain private.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </motion.div>
             )}

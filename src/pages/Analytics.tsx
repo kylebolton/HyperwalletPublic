@@ -18,6 +18,7 @@ import {
 import { motion } from "framer-motion";
 import { usePreviewMode } from "../contexts/PreviewModeContext";
 import { PreviewDataService } from "../services/previewData";
+import { BarChart2, TrendingUp, AlertCircle } from "lucide-react";
 
 export default function Analytics() {
   const { isPreviewMode } = usePreviewMode();
@@ -164,9 +165,9 @@ export default function Analytics() {
                     ))}
                   </Pie>
                   <Tooltip
-                    formatter={(value: number) => [
+                    formatter={(value: number, name: string, props: any) => [
                       `$${value.toFixed(2)}`,
-                      "Value",
+                      props.payload.name || "Asset",
                     ]}
                     contentStyle={{
                       borderRadius: "12px",
@@ -178,10 +179,28 @@ export default function Analytics() {
                   />
                 </PieChart>
               </ResponsiveContainer>
+              <div className="mt-4 space-y-2">
+                {portfolio.map((entry, index) => (
+                  <div key={entry.symbol} className="flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-3 h-3 rounded-full"
+                        style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                      />
+                      <span className="font-bold">{entry.name}</span>
+                    </div>
+                    <span className="text-[var(--text-secondary)]">
+                      ${entry.value.toFixed(2)}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           ) : (
-            <div className="h-64 flex items-center justify-center text-[var(--text-secondary)]">
-              No assets found to display
+            <div className="h-64 flex flex-col items-center justify-center text-[var(--text-secondary)]">
+              <BarChart2 size={48} className="mb-4 text-[var(--text-tertiary)]" />
+              <p className="font-bold mb-1">No assets found</p>
+              <p className="text-sm">Add assets to your portfolio to see allocation</p>
             </div>
           )}
         </motion.div>
@@ -193,7 +212,13 @@ export default function Analytics() {
           transition={{ delay: 0.1 }}
           className="p-6 bg-[var(--bg-secondary)] rounded-3xl border border-[var(--border-primary)] transition-colors"
         >
-          <h2 className="text-xl font-bold mb-6">Market Trends (7d)</h2>
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-bold">Market Trends (7d)</h2>
+            <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)] bg-blue-50 dark:bg-blue-950 px-2 py-1 rounded-full border border-blue-200 dark:border-blue-800">
+              <TrendingUp size={12} />
+              Mock Data
+            </div>
+          </div>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={mockHistoryData}>
@@ -236,31 +261,44 @@ export default function Analytics() {
       {/* Price List */}
       <div className="p-6 bg-[var(--bg-secondary)] rounded-3xl border border-[var(--border-primary)] shadow-sm transition-colors">
         <h2 className="text-xl font-bold mb-4">Live Market Prices</h2>
-        <div className="space-y-4">
-          {Object.entries(marketData).map(([symbol, data]) => (
-            <div
-              key={symbol}
-              className="flex items-center justify-between p-3 hover:bg-[var(--hover-bg)] rounded-xl transition-colors"
-            >
-              <div className="font-bold">{symbol}</div>
-              <div className="text-right">
-                <div className="font-bold">
-                  ${data.current_price.toLocaleString()}
-                </div>
-                <div
-                  className={`text-xs font-bold ${
-                    data.price_change_percentage_24h >= 0
-                      ? "text-green-500"
-                      : "text-red-500"
-                  }`}
-                >
-                  {data.price_change_percentage_24h > 0 ? "+" : ""}
-                  {data.price_change_percentage_24h.toFixed(2)}%
+        {Object.keys(marketData).length === 0 && !loading ? (
+          <div className="text-center py-12">
+            <AlertCircle size={48} className="mx-auto mb-4 text-[var(--text-tertiary)]" />
+            <p className="text-[var(--text-secondary)] font-bold mb-1">No market data available</p>
+            <p className="text-sm text-[var(--text-secondary)]">Market prices will appear here once available</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {Object.entries(marketData).map(([symbol, data]) => (
+              <div
+                key={symbol}
+                className="flex items-center justify-between p-3 hover:bg-[var(--hover-bg)] rounded-xl transition-colors"
+              >
+                <div className="font-bold">{symbol}</div>
+                <div className="text-right">
+                  <div className="font-bold">
+                    ${data.current_price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}
+                  </div>
+                  <div
+                    className={`text-xs font-bold flex items-center gap-1 justify-end ${
+                      data.price_change_percentage_24h >= 0
+                        ? "text-green-500"
+                        : "text-red-500"
+                    }`}
+                  >
+                    {data.price_change_percentage_24h >= 0 ? (
+                      <TrendingUp size={12} />
+                    ) : (
+                      <TrendingUp size={12} className="rotate-180" />
+                    )}
+                    {data.price_change_percentage_24h > 0 ? "+" : ""}
+                    {data.price_change_percentage_24h.toFixed(2)}%
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

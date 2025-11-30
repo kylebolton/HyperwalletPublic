@@ -19,6 +19,9 @@ const ERC20_ABI = [
   "function name() view returns (string)",
 ];
 
+// ERC20 Transfer event signature for event scanning
+const TRANSFER_EVENT_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+
 // Common HyperEVM token addresses (this would ideally come from a token list or registry)
 // Note: Placeholder addresses - these should be updated with actual HyperEVM token addresses when available
 const COMMON_TOKENS: Record<
@@ -89,6 +92,166 @@ const COMMON_TOKENS: Record<
 
 export class TokenService {
   private static readonly HYPEREVM_RPC = "https://eth.llamarpc.com";
+  private static readonly TOKEN_REGISTRY_URL = "https://tokens.coingecko.com/ethereum/all.json";
+  private static readonly MAX_BLOCKS_TO_SCAN = 10000; // Scan last 10k blocks for Transfer events
+
+  /**
+   * Scan Transfer events to discover tokens with balance > 0
+   */
+  private static async scanTransferEvents(
+    provider: ethers.JsonRpcProvider,
+    walletAddress: string
+  ): Promise<Set<string>> {
+    const discoveredTokens = new Set<string>();
+    
+    try {
+      // Get current block number
+      const currentBlock = await provider.getBlockNumber();
+      const fromBlock = Math.max(0, currentBlock - this.MAX_BLOCKS_TO_SCAN);
+      
+      // Create filter for Transfer events where 'to' is the wallet address
+      const filter = {
+        fromBlock,
+        toBlock: currentBlock,
+        topics: [
+          TRANSFER_EVENT_TOPIC,
+          null, // from address (any)
+          ethers.zeroPadValue(walletAddress, 32), // to address (our wallet)
+        ],
+      };
+      
+      // Query logs with timeout
+      const logsPromise = provider.getLogs(filter);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Event scan timeout")), 10000)
+      );
+      
+      const logs = await Promise.race([logsPromise, timeoutPromise]);
+      
+      // Extract unique token addresses from logs
+      for (const log of logs) {
+        if (log.address && ethers.isAddress(log.address)) {
+          discoveredTokens.add(log.address.toLowerCase());
+        }
+      }
+      
+      // Also check Transfer events where 'from' is the wallet address (for outgoing transfers)
+      const filterFrom = {
+        fromBlock,
+        toBlock: currentBlock,
+        topics: [
+          TRANSFER_EVENT_TOPIC,
+          ethers.zeroPadValue(walletAddress, 32), // from address (our wallet)
+          null, // to address (any)
+        ],
+      };
+      
+      const logsFromPromise = provider.getLogs(filterFrom);
+      const logsFrom = await Promise.race([logsFromPromise, timeoutPromise]).catch(() => []);
+      
+      for (const log of logsFrom) {
+        if (log.address && ethers.isAddress(log.address)) {
+          discoveredTokens.add(log.address.toLowerCase());
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to scan Transfer events for token discovery:", e);
+      // Continue without event scanning - not critical
+    }
+    
+    return discoveredTokens;
+  }
+
+  /**
+   * Fetch token metadata from CoinGecko Token Lists
+   */
+  private static async fetchTokenRegistry(): Promise<Map<string, { symbol: string; name: string; decimals: number; logoURI?: string }>> {
+    const tokenMap = new Map<string, { symbol: string; name: string; decimals: number; logoURI?: string }>();
+    
+    try {
+      const response = await fetch(this.TOKEN_REGISTRY_URL, {
+        headers: { Accept: "application/json" },
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Token registry fetch failed: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      // Process tokens from registry
+      if (data.tokens && Array.isArray(data.tokens)) {
+        for (const token of data.tokens) {
+          if (token.address && ethers.isAddress(token.address)) {
+            const address = token.address.toLowerCase();
+            tokenMap.set(address, {
+              symbol: token.symbol || "UNKNOWN",
+              name: token.name || "Unknown Token",
+              decimals: token.decimals || 18,
+              logoURI: token.logoURI,
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to fetch token registry, continuing without it:", e);
+      // Continue without registry - not critical
+    }
+    
+    return tokenMap;
+  }
+
+  /**
+   * Get token info for a discovered address
+   */
+  private static async getTokenInfo(
+    provider: ethers.JsonRpcProvider,
+    tokenAddress: string,
+    walletAddress: string,
+    registryMetadata?: { symbol: string; name: string; decimals: number; logoURI?: string }
+  ): Promise<TokenInfo | null> {
+    try {
+      const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
+      
+      // Query with timeout
+      const queryPromise = Promise.all([
+        tokenContract.balanceOf(walletAddress),
+        tokenContract.decimals().catch(() => registryMetadata?.decimals || 18),
+        tokenContract.symbol().catch(() => registryMetadata?.symbol || "UNKNOWN"),
+        tokenContract.name().catch(() => registryMetadata?.name || "Unknown Token"),
+      ]);
+      
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Token query timeout")), 5000)
+      );
+      
+      const [balance, decimals, symbol, name] = (await Promise.race([
+        queryPromise,
+        timeoutPromise,
+      ])) as [bigint, number, string, string];
+      
+      const balanceBigInt = BigInt(balance.toString());
+      const decimalsNum = Number(decimals);
+      const formattedBalance = ethers.formatUnits(balance, decimalsNum);
+      
+      // Only return tokens with balance > 0
+      if (balanceBigInt > 0n) {
+        return {
+          address: tokenAddress,
+          symbol: symbol || registryMetadata?.symbol || "UNKNOWN",
+          name: name || registryMetadata?.name || "Unknown Token",
+          decimals: decimalsNum,
+          balance: formattedBalance,
+          logoURI: registryMetadata?.logoURI,
+        };
+      }
+    } catch (e) {
+      // Token might not be ERC20 compliant or query failed
+      console.warn(`Failed to get info for token ${tokenAddress}:`, e);
+    }
+    
+    return null;
+  }
 
   /**
    * Get all tokens for a wallet address on HyperEVM
@@ -101,6 +264,7 @@ export class TokenService {
   ): Promise<TokenInfo[]> {
     const provider = new ethers.JsonRpcProvider(this.HYPEREVM_RPC);
     const tokens: TokenInfo[] = [];
+    const processedAddresses = new Set<string>();
     const tokensWithBalance = new Set<string>();
 
     // Get native HYPE balance - always include HYPE even with 0 balance
@@ -114,6 +278,7 @@ export class TokenService {
         decimals: 18,
         balance: balanceStr,
       });
+      processedAddresses.add(ethers.ZeroAddress.toLowerCase());
       if (parseFloat(balanceStr) > 0) {
         tokensWithBalance.add("HYPE");
       }
@@ -127,12 +292,42 @@ export class TokenService {
         decimals: 18,
         balance: "0.00",
       });
+      processedAddresses.add(ethers.ZeroAddress.toLowerCase());
     }
 
-    // Check common token contracts
+    // Fetch token registry in parallel with event scanning
+    const [discoveredTokenAddresses, tokenRegistry] = await Promise.all([
+      this.scanTransferEvents(provider, walletAddress),
+      this.fetchTokenRegistry(),
+    ]);
+
+    // Process discovered tokens from event scanning
+    const discoveredTokenPromises = Array.from(discoveredTokenAddresses)
+      .filter(addr => !processedAddresses.has(addr.toLowerCase()))
+      .map(async (tokenAddress) => {
+        const registryMetadata = tokenRegistry.get(tokenAddress.toLowerCase());
+        const tokenInfo = await this.getTokenInfo(provider, tokenAddress, walletAddress, registryMetadata);
+        if (tokenInfo) {
+          processedAddresses.add(tokenAddress.toLowerCase());
+          return tokenInfo;
+        }
+        return null;
+      });
+
+    const discoveredTokens = (await Promise.all(discoveredTokenPromises)).filter(
+      (token): token is TokenInfo => token !== null
+    );
+    tokens.push(...discoveredTokens);
+
+    // Check common token contracts (for tokens that might not have Transfer events)
     for (const [symbol, tokenInfo] of Object.entries(COMMON_TOKENS)) {
       if (tokenInfo.address === ethers.ZeroAddress) {
         continue; // Skip native token (already added)
+      }
+
+      const tokenAddressLower = tokenInfo.address.toLowerCase();
+      if (processedAddresses.has(tokenAddressLower)) {
+        continue; // Already processed
       }
 
       // For placeholder addresses (all zeros), always add them with 0 balance if includeZeroBalance is true
@@ -145,11 +340,13 @@ export class TokenService {
             decimals: tokenInfo.decimals,
             balance: "0.00",
           });
+          processedAddresses.add(tokenAddressLower);
         }
         continue;
       }
 
       try {
+        const registryMetadata = tokenRegistry.get(tokenAddressLower);
         const tokenContract = new ethers.Contract(
           tokenInfo.address,
           ERC20_ABI,
@@ -159,9 +356,9 @@ export class TokenService {
         // Add timeout to prevent hanging
         const queryPromise = Promise.all([
           tokenContract.balanceOf(walletAddress),
-          tokenContract.decimals(),
-          tokenContract.symbol(),
-          tokenContract.name(),
+          tokenContract.decimals().catch(() => registryMetadata?.decimals || tokenInfo.decimals),
+          tokenContract.symbol().catch(() => registryMetadata?.symbol || tokenInfo.symbol),
+          tokenContract.name().catch(() => registryMetadata?.name || tokenInfo.name),
         ]);
 
         const timeoutPromise = new Promise<never>((_, reject) =>
@@ -185,7 +382,9 @@ export class TokenService {
             name: name || tokenInfo.name,
             decimals: decimalsNum,
             balance: formattedBalance,
+            logoURI: registryMetadata?.logoURI,
           });
+          processedAddresses.add(tokenAddressLower);
         } else if (includeZeroBalance) {
           // Add token with 0 balance if includeZeroBalance is true
           tokens.push({
@@ -194,19 +393,24 @@ export class TokenService {
             name: name || tokenInfo.name,
             decimals: decimalsNum,
             balance: "0.00",
+            logoURI: registryMetadata?.logoURI,
           });
+          processedAddresses.add(tokenAddressLower);
         }
       } catch (e) {
         // Token contract might not exist or failed to query
         // If includeZeroBalance is true, add it with 0 balance anyway
         if (includeZeroBalance) {
+          const registryMetadata = tokenRegistry.get(tokenAddressLower);
           tokens.push({
             address: tokenInfo.address,
-            symbol: tokenInfo.symbol,
-            name: tokenInfo.name,
-            decimals: tokenInfo.decimals,
+            symbol: registryMetadata?.symbol || tokenInfo.symbol,
+            name: registryMetadata?.name || tokenInfo.name,
+            decimals: registryMetadata?.decimals || tokenInfo.decimals,
             balance: "0.00",
+            logoURI: registryMetadata?.logoURI,
           });
+          processedAddresses.add(tokenAddressLower);
         }
         // Only log warnings for non-placeholder addresses
         if (

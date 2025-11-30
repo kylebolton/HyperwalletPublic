@@ -116,12 +116,32 @@ describe("ZCashChainService", () => {
   });
 
   describe("sendTransaction", () => {
-    it("should throw error indicating not implemented", async () => {
+    it("should validate address before sending", async () => {
       await expect(
-        service.sendTransaction("test-address", "1.0")
-      ).rejects.toThrow(
-        "ZCash transaction sending requires full node or light client implementation"
-      );
+        service.sendTransaction("invalid-address", "1.0")
+      ).rejects.toThrow("Invalid ZCash address");
+    });
+
+    it("should validate amount before sending", async () => {
+      // Get a valid address from the service
+      const validAddress = await service.getAddress();
+      await expect(
+        service.sendTransaction(validAddress, "0")
+      ).rejects.toThrow("Invalid amount");
+    });
+
+    it("should check balance before sending", async () => {
+      // Mock balance to return 0
+      (global.fetch as any).mockResolvedValue({
+        ok: true,
+        json: async () => ({ balance: 0 }),
+      });
+
+      // Get a valid address from the service
+      const validAddress = await service.getAddress();
+      await expect(
+        service.sendTransaction(validAddress, "1.0")
+      ).rejects.toThrow("Insufficient balance");
     });
   });
 

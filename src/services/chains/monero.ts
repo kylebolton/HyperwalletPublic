@@ -143,7 +143,114 @@ export class MoneroChainService implements IChainService {
     }
   }
 
-  async sendTransaction(_to: string, _amount: string): Promise<string> {
-    throw new Error("Monero send not ready");
+  async sendTransaction(to: string, amount: string): Promise<string> {
+    try {
+      // Ensure wallet is initialized
+      if (!this.wallet) {
+        await this.init();
+        if (!this.wallet) {
+          throw new Error("Monero wallet not initialized");
+        }
+      }
+
+      // Validate address
+      if (!this.validateAddress(to)) {
+        throw new Error("Invalid Monero address");
+      }
+
+      // Validate amount
+      const amountNum = parseFloat(amount);
+      if (isNaN(amountNum) || amountNum <= 0) {
+        throw new Error("Invalid amount");
+      }
+
+      // Get current balance to check sufficient funds
+      const balance = await this.wallet.getBalance();
+      const balanceXMR = balance / 1e12;
+      if (amountNum > balanceXMR) {
+        throw new Error("Insufficient balance");
+      }
+
+      // Convert amount to atomic units (1 XMR = 1e12 atomic units)
+      const amountAtomic = BigInt(Math.floor(amountNum * 1e12));
+
+      // Create transaction
+      // monero-ts uses createTx method which returns a transaction
+      // The API may vary, so we try the common patterns
+      let tx: any;
+
+      try {
+        // Try the standard createTx method
+        // This creates and sends the transaction
+        tx = await this.wallet.createTx({
+          accountIndex: 0,
+          address: to,
+          amount: amountAtomic.toString(),
+          priority: 1, // Normal priority (0=default, 1=normal, 2=high)
+        });
+      } catch (createError: any) {
+        // If createTx doesn't work, try alternative API
+        try {
+          // Some versions use different method names
+          if (typeof this.wallet.createTransaction === "function") {
+            tx = await this.wallet.createTransaction({
+              accountIndex: 0,
+              address: to,
+              amount: amountAtomic.toString(),
+            });
+          } else if (typeof this.wallet.send === "function") {
+            // Direct send method
+            tx = await this.wallet.send({
+              address: to,
+              amount: amountAtomic.toString(),
+            });
+          } else {
+            throw createError;
+          }
+        } catch (altError) {
+          console.error("Monero transaction creation failed:", createError, altError);
+          throw new Error(
+            `Failed to create Monero transaction: ${createError.message || "Unknown error"}`
+          );
+        }
+      }
+
+      // Get transaction hash
+      // The transaction object structure may vary
+      let txHash: string;
+
+      if (tx && tx.getHash) {
+        txHash = await tx.getHash();
+      } else if (tx && tx.hash) {
+        txHash = tx.hash;
+      } else if (tx && typeof tx === "string") {
+        txHash = tx;
+      } else if (tx && tx.txHash) {
+        txHash = tx.txHash;
+      } else {
+        // If we can't get hash, try to get it from the transaction data
+        // Some versions return the hash directly or in a different format
+        throw new Error("Could not extract transaction hash from Monero transaction");
+      }
+
+      // Reload wallet to update balance after transaction
+      try {
+        if (typeof this.wallet.refresh === "function") {
+          await this.wallet.refresh();
+        } else if (typeof this.wallet.sync === "function") {
+          await this.wallet.sync();
+        }
+      } catch (refreshError) {
+        // Non-critical - balance will update on next sync
+        console.warn("Failed to refresh wallet after transaction:", refreshError);
+      }
+
+      return txHash;
+    } catch (e: any) {
+      console.error("Monero sendTransaction error:", e);
+      throw new Error(
+        `Monero transaction failed: ${e.message || "Unknown error"}`
+      );
+    }
   }
 }

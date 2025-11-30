@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { WalletService } from "../services/wallet";
 import { motion } from "framer-motion";
-import { Key, FileText, CheckCircle } from "lucide-react";
+import { Key, FileText, CheckCircle, XCircle } from "lucide-react";
 import clsx from "clsx";
 
 export default function Import() {
@@ -13,6 +13,7 @@ export default function Import() {
   const [importInput, setImportInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   const handleImport = async () => {
     setError(null);
@@ -96,15 +97,49 @@ export default function Import() {
           </div>
 
           <div className="space-y-2">
+            <div className="flex items-center justify-between">
             <label className="text-sm font-bold text-[var(--text-secondary)]">
               {importType === "phrase"
                 ? "Recovery Phrase (12 or 24 words)"
                 : "Private Key (Hex format)"}
             </label>
+              {importType === "phrase" && importInput && (
+                <span className="text-xs text-[var(--text-tertiary)]">
+                  {importInput.trim().split(/\s+/).filter(w => w).length} words
+                </span>
+              )}
+            </div>
             <textarea
               value={importInput}
-              onChange={e => setImportInput(e.target.value)}
-              className="w-full p-4 bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-2xl h-40 font-mono text-sm outline-none focus:ring-2 focus:ring-hyper-green transition-all resize-none border border-[var(--border-primary)]"
+              onChange={e => {
+                setImportInput(e.target.value);
+                setError(null);
+                setValidationError(null);
+                
+                // Real-time validation
+                if (importType === "phrase") {
+                  const words = e.target.value.trim().split(/\s+/).filter(w => w);
+                  if (words.length > 0 && words.length !== 12 && words.length !== 24) {
+                    setValidationError(`Recovery phrase must be 12 or 24 words (currently ${words.length})`);
+                  } else {
+                    setValidationError(null);
+                  }
+                } else {
+                  const trimmed = e.target.value.trim();
+                  if (trimmed && !trimmed.match(/^(0x)?[0-9a-fA-F]{64}$/)) {
+                    setValidationError("Invalid private key format. Must be 64 hex characters (with or without 0x prefix)");
+                  } else {
+                    setValidationError(null);
+                  }
+                }
+              }}
+              className={`w-full p-4 bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-2xl h-40 font-mono text-sm outline-none focus:ring-2 transition-all resize-none border ${
+                validationError
+                  ? "border-red-500 focus:ring-red-500/20"
+                  : importInput && !validationError
+                  ? "border-green-500 focus:ring-green-500/20"
+                  : "border-[var(--border-primary)] focus:ring-hyper-green"
+              }`}
               placeholder={
                 importType === "phrase"
                   ? "Enter your 12 or 24 word recovery phrase..."
@@ -112,13 +147,31 @@ export default function Import() {
               }
               disabled={success}
             />
-            {importType === "phrase" && (
+            {validationError && (
+              <p className="text-xs text-red-500 font-medium flex items-center gap-1">
+                <XCircle size={12} />
+                {validationError}
+              </p>
+            )}
+            {!validationError && importInput && importType === "phrase" && (
+              <p className="text-xs text-green-500 dark:text-green-400 font-medium flex items-center gap-1">
+                <CheckCircle size={12} />
+                Valid recovery phrase format
+              </p>
+            )}
+            {!validationError && importInput && importType === "privateKey" && (
+              <p className="text-xs text-green-500 dark:text-green-400 font-medium flex items-center gap-1">
+                <CheckCircle size={12} />
+                Valid private key format
+              </p>
+            )}
+            {importType === "phrase" && !importInput && (
               <p className="text-xs text-[var(--text-secondary)]">
                 Enter your recovery phrase words separated by spaces. This will
                 replace your current wallet.
               </p>
             )}
-            {importType === "privateKey" && (
+            {importType === "privateKey" && !importInput && (
               <p className="text-xs text-[var(--text-secondary)]">
                 Enter your EVM-compatible private key. Note: Private keys only
                 work with EVM chains (ETH, HYPE). BTC, SOL, and XMR require a
@@ -150,7 +203,7 @@ export default function Import() {
 
           <button
             onClick={handleImport}
-            disabled={!importInput || success}
+            disabled={!importInput || success || !!validationError}
             className={clsx(
               "w-full py-4 bg-[var(--text-primary)] text-[var(--bg-primary)] rounded-2xl font-bold text-lg transition-all",
               success

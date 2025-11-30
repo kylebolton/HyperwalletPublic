@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { ArrowUpRight, ArrowDownLeft, RefreshCw } from "lucide-react";
+import { ArrowUpRight, ArrowDownLeft, RefreshCw, Filter, ArrowUpDown, History as HistoryIcon, ChevronDown } from "lucide-react";
 import { ChainManager, SupportedChain } from "../services/chains/manager";
 import { NetworkService } from "../services/networks";
 import { StorageService } from "../services/storage";
@@ -13,6 +13,10 @@ export default function History() {
   const { isPreviewMode } = usePreviewMode();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filterType, setFilterType] = useState<"all" | "send" | "receive" | "swap">("all");
+  const [sortBy, setSortBy] = useState<"date" | "amount">("date");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [showFilters, setShowFilters] = useState(false);
 
   useEffect(() => {
     const fetchHistory = async () => {
@@ -78,9 +82,109 @@ export default function History() {
     fetchHistory();
   }, [isPreviewMode]);
 
+  // Filter and sort transactions
+  const filteredAndSortedTransactions = transactions
+    .filter(tx => filterType === "all" || tx.type === filterType)
+    .sort((a, b) => {
+      if (sortBy === "date") {
+        const dateA = new Date(a.date).getTime();
+        const dateB = new Date(b.date).getTime();
+        return sortOrder === "desc" ? dateB - dateA : dateA - dateB;
+      } else {
+        const amountA = parseFloat(a.amount);
+        const amountB = parseFloat(b.amount);
+        return sortOrder === "desc" ? amountB - amountA : amountA - amountB;
+      }
+    });
+
   return (
     <div className="space-y-8">
+      <div className="flex items-center justify-between">
       <h1 className="text-4xl font-bold tracking-tighter">History</h1>
+        <button
+          onClick={() => setShowFilters(!showFilters)}
+          className="flex items-center gap-2 px-4 py-2 bg-[var(--bg-secondary)] hover:bg-[var(--hover-bg)] border border-[var(--border-primary)] rounded-xl font-bold text-sm transition-colors"
+        >
+          <Filter size={18} />
+          Filters
+          <ChevronDown size={16} className={showFilters ? "rotate-180 transition-transform" : "transition-transform"} />
+        </button>
+      </div>
+
+      {showFilters && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          exit={{ opacity: 0, height: 0 }}
+          className="p-4 bg-[var(--bg-secondary)] rounded-2xl border border-[var(--border-primary)] transition-colors"
+        >
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-bold text-[var(--text-secondary)] mb-2 block">Filter by Type</label>
+              <div className="flex gap-2 flex-wrap">
+                {(["all", "send", "receive", "swap"] as const).map(type => (
+                  <button
+                    key={type}
+                    onClick={() => setFilterType(type)}
+                    className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${
+                      filterType === type
+                        ? "bg-hyper-green text-black"
+                        : "bg-[var(--bg-tertiary)] text-[var(--text-primary)] hover:bg-[var(--hover-bg)]"
+                    }`}
+                  >
+                    {type.charAt(0).toUpperCase() + type.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-sm font-bold text-[var(--text-secondary)] mb-2 block">Sort by</label>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    if (sortBy === "date") {
+                      setSortOrder(sortOrder === "desc" ? "asc" : "desc");
+                    } else {
+                      setSortBy("date");
+                      setSortOrder("desc");
+                    }
+                  }}
+                  className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
+                    sortBy === "date"
+                      ? "bg-hyper-green text-black"
+                      : "bg-[var(--bg-tertiary)] text-[var(--text-primary)] hover:bg-[var(--hover-bg)]"
+                  }`}
+                >
+                  Date
+                  {sortBy === "date" && (
+                    <ArrowUpDown size={14} className={sortOrder === "desc" ? "rotate-180" : ""} />
+                  )}
+                </button>
+                <button
+                  onClick={() => {
+                    if (sortBy === "amount") {
+                      setSortOrder(sortOrder === "desc" ? "asc" : "desc");
+                    } else {
+                      setSortBy("amount");
+                      setSortOrder("desc");
+                    }
+                  }}
+                  className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
+                    sortBy === "amount"
+                      ? "bg-hyper-green text-black"
+                      : "bg-[var(--bg-tertiary)] text-[var(--text-primary)] hover:bg-[var(--hover-bg)]"
+                  }`}
+                >
+                  Amount
+                  {sortBy === "amount" && (
+                    <ArrowUpDown size={14} className={sortOrder === "desc" ? "rotate-180" : ""} />
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      )}
 
       {loading ? (
         <div className="space-y-4">
@@ -91,9 +195,9 @@ export default function History() {
             ></div>
           ))}
         </div>
-      ) : transactions.length > 0 ? (
+      ) : filteredAndSortedTransactions.length > 0 ? (
         <div className="space-y-4">
-          {transactions.map(tx => (
+          {filteredAndSortedTransactions.map(tx => (
             <motion.div
               key={tx.id}
               initial={{ opacity: 0, x: -20 }}
@@ -130,7 +234,15 @@ export default function History() {
                     {tx.asset}
                   </span>
                 </div>
-                <div className="text-xs font-bold text-green-500 dark:text-green-400 bg-green-50 dark:bg-green-950 px-2 py-1 rounded-full inline-block mt-1 transition-colors">
+                <div
+                  className={`text-xs font-bold px-2 py-1 rounded-full inline-block mt-1 transition-colors ${
+                    tx.status === "confirmed" || tx.status === "success"
+                      ? "text-green-500 dark:text-green-400 bg-green-50 dark:bg-green-950"
+                      : tx.status === "pending"
+                      ? "text-yellow-500 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-950"
+                      : "text-red-500 dark:text-red-400 bg-red-50 dark:bg-red-950"
+                  }`}
+                >
                   {tx.status}
                 </div>
               </div>
@@ -138,9 +250,29 @@ export default function History() {
           ))}
         </div>
       ) : (
-        <div className="text-center py-20 text-[var(--text-secondary)]">
-          No transaction history found.
-        </div>
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="text-center py-20 bg-[var(--bg-secondary)] rounded-3xl border border-[var(--border-primary)] transition-colors"
+        >
+          <HistoryIcon size={64} className="mx-auto mb-6 text-[var(--text-tertiary)]" />
+          <h2 className="text-2xl font-bold mb-2">
+            {filterType !== "all" ? `No ${filterType} transactions found` : "No transaction history found"}
+          </h2>
+          <p className="text-[var(--text-secondary)] mb-6 max-w-md mx-auto">
+            {filterType !== "all"
+              ? `Try changing the filter to see other transaction types.`
+              : "Your transaction history will appear here once you start sending, receiving, or swapping assets."}
+          </p>
+          {filterType !== "all" && (
+            <button
+              onClick={() => setFilterType("all")}
+              className="px-6 py-3 bg-hyper-green text-black rounded-xl font-bold hover:bg-hyper-dark transition-colors"
+            >
+              Show All Transactions
+            </button>
+          )}
+        </motion.div>
       )}
     </div>
   );

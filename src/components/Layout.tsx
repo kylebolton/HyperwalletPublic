@@ -29,6 +29,7 @@ export default function Layout() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(true);
   const [syncStatus, setSyncStatus] = useState<string>("Connecting to chains...");
+  const [isSwitchingWallet, setIsSwitchingWallet] = useState(false);
 
   // Console log suppression - enable/disable based on sync status
   useEffect(() => {
@@ -163,12 +164,20 @@ export default function Layout() {
     };
   }, [activeWallet?.id]);
 
-  const handleSwitchWallet = (walletId: string) => {
-    WalletService.switchWallet(walletId);
-    setActiveWallet(WalletService.getActiveWallet());
+  const handleSwitchWallet = async (walletId: string) => {
+    setIsSwitchingWallet(true);
     setIsDropdownOpen(false);
-    // Refresh the page to reload data with new wallet
-    window.location.reload();
+    try {
+      WalletService.switchWallet(walletId);
+      setActiveWallet(WalletService.getActiveWallet());
+      // Small delay for better UX
+      await new Promise(resolve => setTimeout(resolve, 300));
+      // Refresh the page to reload data with new wallet
+      window.location.reload();
+    } catch (e) {
+      console.error("Failed to switch wallet:", e);
+      setIsSwitchingWallet(false);
+    }
   };
 
   const handleCreateWallet = () => {
@@ -218,8 +227,10 @@ export default function Layout() {
 
             {isDropdownOpen && (
               <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
+                initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                transition={{ duration: 0.2 }}
                 className="absolute top-full left-0 right-0 mt-2 bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-xl shadow-lg z-50 max-h-64 overflow-y-auto transition-colors"
               >
                 <div className="p-2">
@@ -227,29 +238,39 @@ export default function Layout() {
                     <button
                       key={wallet.id}
                       onClick={() => handleSwitchWallet(wallet.id)}
+                      disabled={isSwitchingWallet || activeWallet?.id === wallet.id}
                       className={clsx(
                         "w-full text-left p-3 rounded-lg transition-colors flex items-center justify-between",
                         activeWallet?.id === wallet.id
                           ? "bg-[var(--text-primary)] text-[var(--bg-primary)]"
-                          : "hover:bg-[var(--hover-bg)] text-[var(--text-primary)]"
+                          : "hover:bg-[var(--hover-bg)] text-[var(--text-primary)]",
+                        isSwitchingWallet && "opacity-50 cursor-not-allowed"
                       )}
                     >
                       <div className="flex-1 min-w-0">
-                        <div className="font-bold text-sm truncate">
-                          {wallet.name}
+                        <div className="font-bold text-sm truncate flex items-center gap-2">
+                          {isSwitchingWallet && activeWallet?.id === wallet.id ? (
+                            <>
+                              <Loader2 size={14} className="animate-spin" />
+                              Switching...
+                            </>
+                          ) : (
+                            wallet.name
+                          )}
                         </div>
                         <div className="text-xs opacity-70 truncate">
                           {new Date(wallet.createdAt).toLocaleDateString()}
                         </div>
                       </div>
-                      {activeWallet?.id === wallet.id && (
-                        <div className="w-2 h-2 bg-hyper-green rounded-full shrink-0 ml-2"></div>
+                      {activeWallet?.id === wallet.id && !isSwitchingWallet && (
+                        <div className="w-2 h-2 bg-hyper-green rounded-full shrink-0 ml-2 animate-pulse"></div>
                       )}
                     </button>
                   ))}
                   <button
                     onClick={handleCreateWallet}
-                    className="w-full text-left p-3 rounded-lg hover:bg-[var(--hover-bg)] transition-colors flex items-center gap-3 text-[var(--text-secondary)] hover:text-[var(--text-primary)] mt-1"
+                    disabled={isSwitchingWallet}
+                    className="w-full text-left p-3 rounded-lg hover:bg-[var(--hover-bg)] transition-colors flex items-center gap-3 text-[var(--text-secondary)] hover:text-[var(--text-primary)] mt-1 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Plus size={16} />
                     <span className="font-bold text-sm">Create New Wallet</span>
@@ -291,31 +312,62 @@ export default function Layout() {
             {isSyncing ? (
               <>
                 <Loader2 size={16} className="text-yellow-500 animate-spin" />
-                <div className="flex flex-col">
+                <div className="flex flex-col flex-1 min-w-0">
                   <span className="text-xs font-bold text-yellow-500">
                     STATUS: CONNECTING
                   </span>
                   {syncStatus && syncStatus !== "Connecting to chains..." && (
-                    <span className="text-xs text-yellow-400 mt-0.5">
+                    <span className="text-xs text-yellow-400 mt-0.5 truncate" title={syncStatus}>
                       {syncStatus}
                     </span>
                   )}
                 </div>
               </>
+            ) : syncStatus === "Connection failed" ? (
+              <>
+                <ShieldCheck size={16} className="text-red-500" />
+                <div className="flex flex-col flex-1 min-w-0">
+                  <span className="text-xs font-bold text-red-500">
+                    STATUS: ERROR
+                  </span>
+                  <span className="text-xs text-red-400 mt-0.5 truncate" title={syncStatus}>
+                    {syncStatus}
+                  </span>
+                </div>
+              </>
             ) : (
               <>
                 <ShieldCheck size={16} className="text-green-500" />
-                <span className="text-xs font-bold text-[var(--text-secondary)]">
-                  STATUS: SECURE
-                </span>
+                <div className="flex flex-col flex-1 min-w-0">
+                  <span className="text-xs font-bold text-green-500">
+                    STATUS: SECURE
+                  </span>
+                  {syncStatus && syncStatus !== "Connected" && (
+                    <span className="text-xs text-green-400 mt-0.5 truncate" title={syncStatus}>
+                      {syncStatus}
+                    </span>
+                  )}
+                </div>
               </>
             )}
           </div>
           <div className="w-full bg-[var(--bg-tertiary)] h-1.5 rounded-full overflow-hidden">
             {isSyncing ? (
-              <div className="bg-yellow-500 h-full w-full animate-pulse"></div>
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: "100%" }}
+                transition={{ duration: 0.3 }}
+                className="bg-yellow-500 h-full"
+              />
+            ) : syncStatus === "Connection failed" ? (
+              <div className="bg-red-500 h-full w-full" />
             ) : (
-              <div className="bg-green-500 h-full w-full animate-pulse"></div>
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: "100%" }}
+                transition={{ duration: 0.3 }}
+                className="bg-green-500 h-full"
+              />
             )}
           </div>
         </div>

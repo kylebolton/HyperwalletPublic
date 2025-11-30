@@ -1,6 +1,6 @@
 import { X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ReactNode } from "react";
+import { ReactNode, useEffect } from "react";
 
 interface ModalProps {
   isOpen: boolean;
@@ -15,6 +15,20 @@ export default function Modal({
   title,
   children,
 }: ModalProps) {
+  // Handle ESC key to close modal
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    };
+
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [isOpen, onClose]);
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -30,14 +44,16 @@ export default function Modal({
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
             className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none p-4"
           >
-            <div className="bg-[var(--bg-primary)] rounded-3xl w-full max-w-md max-h-[90vh] overflow-hidden pointer-events-auto border border-[var(--border-primary)] flex flex-col transition-colors">
+            <div className="bg-[var(--bg-primary)] rounded-3xl w-full max-w-md max-h-[90vh] overflow-hidden pointer-events-auto border border-[var(--border-primary)] flex flex-col transition-colors shadow-2xl">
               <div className="p-6 border-b border-[var(--border-primary)] flex items-center justify-between flex-shrink-0 transition-colors">
                 <h2 className="text-xl font-bold">{title}</h2>
                 <button
                   onClick={onClose}
                   className="p-2 hover:bg-[var(--hover-bg)] rounded-full transition-colors"
+                  aria-label="Close modal"
                 >
                   <X size={20} className="text-[var(--text-secondary)]" />
                 </button>

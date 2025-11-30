@@ -52,6 +52,19 @@ export default function Settings() {
   const [editNetworkRpcUrl, setEditNetworkRpcUrl] = useState<string>("");
   const [editNetworkChainId, setEditNetworkChainId] = useState<number>(1);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [showAddContactModal, setShowAddContactModal] = useState(false);
+  const [showAddWalletModal, setShowAddWalletModal] = useState(false);
+  const [newContactName, setNewContactName] = useState("");
+  const [newContactAddress, setNewContactAddress] = useState("");
+  const [newWalletName, setNewWalletName] = useState("");
+  const [newWalletAddress, setNewWalletAddress] = useState("");
+  const [newWalletChain, setNewWalletChain] = useState("");
+  const [contactNameError, setContactNameError] = useState<string | null>(null);
+  const [contactAddressError, setContactAddressError] = useState<string | null>(null);
+  const [walletNameError, setWalletNameError] = useState<string | null>(null);
+  const [walletAddressError, setWalletAddressError] = useState<string | null>(null);
+  const [walletChainError, setWalletChainError] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   useEffect(() => {
     const loadedContacts = StorageService.get("contacts") || [];
@@ -70,50 +83,109 @@ export default function Settings() {
     setNetworkConfigs(configs);
   }, []);
 
+  const showToast = (message: string, type: "success" | "error" = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
   const addContact = () => {
-    const name = prompt("Enter Name");
-    const address = prompt("Enter Address");
-    if (name && address) {
-      const newContacts = [...contacts, { id: Date.now(), name, address }];
-      setContacts(newContacts);
-      StorageService.save("contacts", newContacts);
+    setNewContactName("");
+    setNewContactAddress("");
+    setContactNameError(null);
+    setContactAddressError(null);
+    setShowAddContactModal(true);
+  };
+
+  const handleSaveContact = () => {
+    setContactNameError(null);
+    setContactAddressError(null);
+
+    if (!newContactName.trim()) {
+      setContactNameError("Name is required");
+      return;
     }
+
+    if (!newContactAddress.trim()) {
+      setContactAddressError("Address is required");
+      return;
+    }
+
+    const newContacts = [...contacts, { id: Date.now(), name: newContactName.trim(), address: newContactAddress.trim() }];
+    setContacts(newContacts);
+    StorageService.save("contacts", newContacts);
+    setShowAddContactModal(false);
+    showToast("Contact added successfully");
   };
 
   const removeContact = (id: number) => {
-    const newContacts = contacts.filter(c => c.id !== id);
-    setContacts(newContacts);
-    StorageService.save("contacts", newContacts);
-  };
-
-  const addWallet = () => {
-    const name = prompt("Enter Wallet Name");
-    const address = prompt("Enter Wallet Address");
-    const chain = prompt("Enter Chain (ETH, BTC, etc.)");
-    if (name && address && chain) {
-      const newWallets = [
-        ...watchWallets,
-        { id: Date.now(), name, address, chain },
-      ];
-      setWatchWallets(newWallets);
-      StorageService.save("watchWallets", newWallets);
+    const contact = contacts.find(c => c.id === id);
+    if (contact && confirm(`Are you sure you want to remove "${contact.name}"?`)) {
+      const newContacts = contacts.filter(c => c.id !== id);
+      setContacts(newContacts);
+      StorageService.save("contacts", newContacts);
+      showToast("Contact removed successfully");
     }
   };
 
-  const removeWallet = (id: number) => {
-    const newWallets = watchWallets.filter(w => w.id !== id);
+  const addWallet = () => {
+    setNewWalletName("");
+    setNewWalletAddress("");
+    setNewWalletChain("");
+    setWalletNameError(null);
+    setWalletAddressError(null);
+    setWalletChainError(null);
+    setShowAddWalletModal(true);
+  };
+
+  const handleSaveWallet = () => {
+    setWalletNameError(null);
+    setWalletAddressError(null);
+    setWalletChainError(null);
+
+    if (!newWalletName.trim()) {
+      setWalletNameError("Wallet name is required");
+      return;
+    }
+
+    if (!newWalletAddress.trim()) {
+      setWalletAddressError("Wallet address is required");
+      return;
+    }
+
+    if (!newWalletChain.trim()) {
+      setWalletChainError("Chain is required");
+      return;
+    }
+
+    const newWallets = [
+      ...watchWallets,
+      { id: Date.now(), name: newWalletName.trim(), address: newWalletAddress.trim(), chain: newWalletChain.trim().toUpperCase() },
+    ];
     setWatchWallets(newWallets);
     StorageService.save("watchWallets", newWallets);
+    setShowAddWalletModal(false);
+    showToast("Watch wallet added successfully");
+  };
+
+  const removeWallet = (id: number) => {
+    const wallet = watchWallets.find(w => w.id === id);
+    if (wallet && confirm(`Are you sure you want to remove "${wallet.name}"?`)) {
+      const newWallets = watchWallets.filter(w => w.id !== id);
+      setWatchWallets(newWallets);
+      StorageService.save("watchWallets", newWallets);
+      showToast("Watch wallet removed successfully");
+    }
   };
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard
       .writeText(text)
       .then(() => {
-        alert("Address copied to clipboard!");
+        showToast("Address copied to clipboard!");
       })
       .catch(err => {
         console.error("Failed to copy:", err);
+        showToast("Failed to copy address", "error");
       });
   };
 
@@ -164,6 +236,22 @@ export default function Settings() {
 
   return (
     <div className="space-y-8">
+      {/* Toast Notification */}
+      {toast && (
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -20 }}
+          className={`fixed top-4 right-4 z-50 px-6 py-4 rounded-xl font-bold text-sm shadow-lg ${
+            toast.type === "success"
+              ? "bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800"
+              : "bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800"
+          } transition-colors`}
+        >
+          {toast.message}
+        </motion.div>
+      )}
+
       <div className="flex items-center justify-between">
         <h1 className="text-4xl font-bold tracking-tighter">Settings</h1>
         <button
@@ -248,9 +336,13 @@ export default function Settings() {
 
           <div className="space-y-3">
             {contacts.length === 0 && (
-              <p className="text-[var(--text-secondary)] text-sm">
-                No contacts saved.
-              </p>
+              <div className="text-center py-12 bg-[var(--bg-secondary)] rounded-xl border border-[var(--border-primary)] transition-colors">
+                <BookUser size={48} className="mx-auto mb-4 text-[var(--text-tertiary)]" />
+                <p className="text-[var(--text-secondary)] font-bold mb-2">No contacts saved</p>
+                <p className="text-[var(--text-secondary)] text-sm">
+                  Add contacts to quickly access frequently used addresses
+                </p>
+              </div>
             )}
             {contacts.map(contact => (
               <div
@@ -299,9 +391,13 @@ export default function Settings() {
 
           <div className="space-y-3">
             {watchWallets.length === 0 && (
-              <p className="text-[var(--text-secondary)] text-sm">
-                No watch wallets saved.
-              </p>
+              <div className="text-center py-12 bg-[var(--bg-secondary)] rounded-xl border border-[var(--border-primary)] transition-colors">
+                <Wallet size={48} className="mx-auto mb-4 text-[var(--text-tertiary)]" />
+                <p className="text-[var(--text-secondary)] font-bold mb-2">No watch wallets saved</p>
+                <p className="text-[var(--text-secondary)] text-sm">
+                  Add watch wallets to track balances and history of any EVM address
+                </p>
+              </div>
             )}
             {watchWallets.map(wallet => (
               <div
@@ -675,6 +771,189 @@ export default function Settings() {
           </div>
         </motion.div>
       )}
+
+      {/* Add Contact Modal */}
+      <Modal
+        isOpen={showAddContactModal}
+        onClose={() => {
+          setShowAddContactModal(false);
+          setNewContactName("");
+          setNewContactAddress("");
+          setContactNameError(null);
+          setContactAddressError(null);
+        }}
+        title="Add Contact"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-bold text-[var(--text-secondary)] mb-2">
+              Name
+            </label>
+            <input
+              type="text"
+              value={newContactName}
+              onChange={e => {
+                setNewContactName(e.target.value);
+                setContactNameError(null);
+              }}
+              className={`w-full p-3 bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-xl border outline-none focus:ring-2 focus:ring-hyper-green transition-all ${
+                contactNameError ? "border-red-500" : "border-[var(--border-primary)]"
+              }`}
+              placeholder="Enter contact name"
+              maxLength={50}
+              autoFocus
+            />
+            {contactNameError && (
+              <p className="text-xs text-red-500 mt-1">{contactNameError}</p>
+            )}
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-[var(--text-secondary)] mb-2">
+              Address
+            </label>
+            <input
+              type="text"
+              value={newContactAddress}
+              onChange={e => {
+                setNewContactAddress(e.target.value);
+                setContactAddressError(null);
+              }}
+              className={`w-full p-3 bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-xl border font-mono text-sm outline-none focus:ring-2 focus:ring-hyper-green transition-all ${
+                contactAddressError ? "border-red-500" : "border-[var(--border-primary)]"
+              }`}
+              placeholder="Enter address"
+            />
+            {contactAddressError && (
+              <p className="text-xs text-red-500 mt-1">{contactAddressError}</p>
+            )}
+          </div>
+          <div className="flex gap-3 pt-4">
+            <button
+              onClick={handleSaveContact}
+              className="flex-1 py-3 bg-hyper-green text-black rounded-xl font-bold hover:bg-hyper-dark transition-colors"
+            >
+              Save
+            </button>
+            <button
+              onClick={() => {
+                setShowAddContactModal(false);
+                setNewContactName("");
+                setNewContactAddress("");
+                setContactNameError(null);
+                setContactAddressError(null);
+              }}
+              className="flex-1 py-3 bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-xl font-bold hover:bg-[var(--hover-bg)] transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Add Watch Wallet Modal */}
+      <Modal
+        isOpen={showAddWalletModal}
+        onClose={() => {
+          setShowAddWalletModal(false);
+          setNewWalletName("");
+          setNewWalletAddress("");
+          setNewWalletChain("");
+          setWalletNameError(null);
+          setWalletAddressError(null);
+          setWalletChainError(null);
+        }}
+        title="Add Watch Wallet"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-bold text-[var(--text-secondary)] mb-2">
+              Wallet Name
+            </label>
+            <input
+              type="text"
+              value={newWalletName}
+              onChange={e => {
+                setNewWalletName(e.target.value);
+                setWalletNameError(null);
+              }}
+              className={`w-full p-3 bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-xl border outline-none focus:ring-2 focus:ring-hyper-green transition-all ${
+                walletNameError ? "border-red-500" : "border-[var(--border-primary)]"
+              }`}
+              placeholder="Enter wallet name"
+              maxLength={50}
+              autoFocus
+            />
+            {walletNameError && (
+              <p className="text-xs text-red-500 mt-1">{walletNameError}</p>
+            )}
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-[var(--text-secondary)] mb-2">
+              Wallet Address
+            </label>
+            <input
+              type="text"
+              value={newWalletAddress}
+              onChange={e => {
+                setNewWalletAddress(e.target.value);
+                setWalletAddressError(null);
+              }}
+              className={`w-full p-3 bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-xl border font-mono text-sm outline-none focus:ring-2 focus:ring-hyper-green transition-all ${
+                walletAddressError ? "border-red-500" : "border-[var(--border-primary)]"
+              }`}
+              placeholder="Enter wallet address"
+            />
+            {walletAddressError && (
+              <p className="text-xs text-red-500 mt-1">{walletAddressError}</p>
+            )}
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-[var(--text-secondary)] mb-2">
+              Chain
+            </label>
+            <input
+              type="text"
+              value={newWalletChain}
+              onChange={e => {
+                setNewWalletChain(e.target.value);
+                setWalletChainError(null);
+              }}
+              className={`w-full p-3 bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-xl border outline-none focus:ring-2 focus:ring-hyper-green transition-all ${
+                walletChainError ? "border-red-500" : "border-[var(--border-primary)]"
+              }`}
+              placeholder="ETH, BTC, SOL, etc."
+            />
+            {walletChainError && (
+              <p className="text-xs text-red-500 mt-1">{walletChainError}</p>
+            )}
+            <p className="text-xs text-[var(--text-secondary)] mt-1">
+              Enter the chain symbol (e.g., ETH, BTC, SOL)
+            </p>
+          </div>
+          <div className="flex gap-3 pt-4">
+            <button
+              onClick={handleSaveWallet}
+              className="flex-1 py-3 bg-hyper-green text-black rounded-xl font-bold hover:bg-hyper-dark transition-colors"
+            >
+              Save
+            </button>
+            <button
+              onClick={() => {
+                setShowAddWalletModal(false);
+                setNewWalletName("");
+                setNewWalletAddress("");
+                setNewWalletChain("");
+                setWalletNameError(null);
+                setWalletAddressError(null);
+                setWalletChainError(null);
+              }}
+              className="flex-1 py-3 bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-xl font-bold hover:bg-[var(--hover-bg)] transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Network Edit Modal */}
       <Modal

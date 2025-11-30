@@ -6,7 +6,7 @@ import { NetworkService } from "../services/networks";
 import { TokenService, type TokenInfo } from "../services/tokens";
 import { MarketService, type MarketData } from "../services/market";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowUpRight, ArrowDownLeft, ChevronDown, ChevronUp, Shield } from "lucide-react";
+import { ArrowUpRight, ArrowDownLeft, ChevronDown, ChevronUp, Shield, RefreshCw, Wallet as WalletIcon, AlertCircle } from "lucide-react";
 import ReceiveModal from "../components/ReceiveModal";
 import SendModal from "../components/SendModal";
 import AssetLogo from "../components/AssetLogo";
@@ -27,7 +27,7 @@ interface AssetCardProps {
   isLoading: boolean;
   onSend: () => void;
   onReceive: () => void;
-  index: number;
+  animationIndex: number;
   isPrivacyCoin?: boolean;
   hasShieldSwap?: boolean; // For ZEC only
   marketData?: Record<string, MarketData>;
@@ -40,7 +40,7 @@ function AssetCard({
   isLoading,
   onSend,
   onReceive,
-  index,
+  animationIndex,
   isPrivacyCoin = false,
   hasShieldSwap = false,
   marketData,
@@ -67,7 +67,7 @@ function AssetCard({
     <motion.div
       initial={{ opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: index * 0.05 }}
+      transition={{ delay: animationIndex * 0.05 }}
       className="flex items-center justify-between p-4 transition-all duration-200 group hover:bg-[var(--hover-bg)]"
     >
       <div className="flex items-center gap-4 min-w-[200px] flex-shrink-0">
@@ -129,7 +129,7 @@ function AssetCard({
         </button>
         <button
           onClick={onReceive}
-          disabled={balance === "N/A"}
+          disabled={balance === "N/A" || balance === "Error"}
           className="p-3 bg-[var(--bg-tertiary)] rounded-xl hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           title="Receive"
         >
@@ -150,6 +150,8 @@ export default function Dashboard() {
   const [totalBalance, setTotalBalance] = useState<number | null>(null);
   const [loadingBalance, setLoadingBalance] = useState(true);
   const [marketData, setMarketData] = useState<Record<string, MarketData>>({});
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [hasError, setHasError] = useState(false);
 
   // Calculate total balance in USD
   const calculateTotalBalance = useCallback(async (balanceData: Record<string, string>) => {
@@ -217,7 +219,7 @@ export default function Dashboard() {
     let isMounted = true;
     let timeoutId: NodeJS.Timeout;
 
-    const load = async () => {
+    const loadData = async () => {
       // If preview mode is enabled, use mock data
       if (isPreviewMode) {
         const mockBalances = PreviewDataService.getMockBalances();
@@ -488,17 +490,20 @@ export default function Dashboard() {
         }
       } catch (e) {
         console.error("Failed to load dashboard data:", e);
-        if (isMounted) setLoadingAssets(new Set());
+        if (isMounted) {
+          setLoadingAssets(new Set());
+          setHasError(true);
+        }
       }
     };
 
-    load();
+    await loadData();
 
     // Refresh when active wallet changes (polling approach)
     const interval = setInterval(() => {
       const currentActive = WalletService.getActiveWallet();
       if (currentActive?.id !== WalletService.getActiveWallet()?.id) {
-        load();
+        loadData();
       }
     }, 1000);
 
@@ -515,6 +520,13 @@ export default function Dashboard() {
       calculateTotalBalance(balances);
     }
   }, [balances, calculateTotalBalance]);
+
+  const refreshBalances = () => {
+    setIsRefreshing(true);
+    setHasError(false);
+    // Reload page to refresh all data
+    window.location.reload();
+  };
 
   // Build base assets (non-HyperEVM chains) - separated into regular chains and privacy coins
   const baseChains: Asset[] = [
@@ -586,6 +598,15 @@ export default function Dashboard() {
             </p>
           )}
         </div>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={refreshBalances}
+            disabled={isRefreshing}
+            className="p-3 bg-[var(--bg-secondary)] hover:bg-[var(--hover-bg)] border border-[var(--border-primary)] rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Refresh balances"
+          >
+            <RefreshCw size={20} className={`text-[var(--text-primary)] ${isRefreshing ? "animate-spin" : ""}`} />
+          </button>
         <div className="text-right">
           {loadingBalance ? (
             <div className="h-8 w-32 bg-[var(--bg-tertiary)] rounded animate-pulse"></div>
@@ -599,8 +620,57 @@ export default function Dashboard() {
               </div>
             </div>
           )}
+          </div>
         </div>
       </div>
+
+      {hasError && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-4 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-xl flex items-center gap-3 transition-colors"
+        >
+          <AlertCircle size={20} className="text-red-500 dark:text-red-400 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-bold text-red-700 dark:text-red-400">Failed to load some balances</p>
+            <p className="text-xs text-red-600 dark:text-red-500 mt-1">Some assets may not be displayed correctly. Click refresh to try again.</p>
+          </div>
+          <button
+            onClick={refreshBalances}
+            className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-bold hover:bg-red-700 transition-colors"
+          >
+            Retry
+          </button>
+        </motion.div>
+      )}
+
+      {Object.keys(balances).length === 0 && hyperEVMAssets.length === 0 && baseChains.length === 0 && privacyCoins.length === 0 && !loadingAssets.size && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="text-center py-20 bg-[var(--bg-secondary)] rounded-3xl border border-[var(--border-primary)] transition-colors"
+        >
+          <WalletIcon size={64} className="mx-auto mb-6 text-[var(--text-tertiary)]" />
+          <h2 className="text-2xl font-bold mb-2">No Assets Found</h2>
+          <p className="text-[var(--text-secondary)] mb-6 max-w-md mx-auto">
+            Your portfolio is empty. Start by receiving some assets or swap to get started.
+          </p>
+          <div className="flex gap-4 justify-center">
+            <button
+              onClick={() => window.location.href = "/swap"}
+              className="px-6 py-3 bg-hyper-green text-black rounded-xl font-bold hover:bg-hyper-dark transition-colors"
+            >
+              Go to Swap
+            </button>
+            <button
+              onClick={refreshBalances}
+              className="px-6 py-3 bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-xl font-bold hover:bg-[var(--hover-bg)] border border-[var(--border-primary)] transition-colors"
+            >
+              Refresh
+            </button>
+          </div>
+        </motion.div>
+      )}
 
       <div className="flex flex-col gap-4">
         {/* HyperEVM Category Section */}
@@ -765,7 +835,7 @@ export default function Dashboard() {
                             });
                           }
                         }}
-                        index={i}
+                        animationIndex={i}
                       />
                     ))}
                   </div>
@@ -784,7 +854,7 @@ export default function Dashboard() {
             address={addresses[asset.symbol]}
             isLoading={loadingAssets.has(asset.symbol)}
             marketData={marketData}
-            index={i}
+            animationIndex={i}
             onSend={() =>
               setSendModal({
                 isOpen: true,
@@ -898,7 +968,7 @@ export default function Dashboard() {
                 });
               }
             }}
-            index={i}
+            animationIndex={i}
           />
         ))}
 
@@ -1042,7 +1112,7 @@ export default function Dashboard() {
                       });
                     }
                   }}
-                  index={i}
+                  animationIndex={i}
                 />
               ))}
             </div>

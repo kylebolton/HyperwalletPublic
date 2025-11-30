@@ -46,13 +46,15 @@ export class ZCashShieldService {
     // This is a placeholder structure for the shield swap flow
 
     const fee = (parseFloat(amount) * 0.001).toFixed(8); // 0.1% shield swap fee
+    const amountNum = parseFloat(amount);
+    const netAmount = (amountNum - parseFloat(fee)).toFixed(8); // Amount after fee deduction
 
     return {
       fromAddress: transparentAddress,
       toAddress: transparentAddress, // Placeholder - would be z-address for shielded
       fromType,
       toType,
-      amount,
+      amount: netAmount, // Return net amount after fee
       fee,
     };
   }
