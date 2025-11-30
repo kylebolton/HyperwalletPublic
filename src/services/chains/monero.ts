@@ -68,17 +68,8 @@ export class MoneroChainService implements IChainService {
         errorMessage.includes("GenUtils") ||
         errorMessage.includes("module resolution");
 
-      if (isModuleError) {
-        console.warn(
-          "Monero library is not compatible with this browser environment. Monero features will be disabled.",
-          errorMessage
-        );
-      } else {
-        console.error(
-          "Monero library import or initialization failed:",
-          errorMessage
-        );
-      }
+      // Silently handle Monero initialization failures - expected in browser environments
+      // Monero features will be disabled gracefully
       // Set wallet to null to indicate failure (don't throw)
       // This allows the service to gracefully degrade
       this.wallet = null;

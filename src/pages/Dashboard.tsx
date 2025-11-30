@@ -6,7 +6,16 @@ import { NetworkService } from "../services/networks";
 import { TokenService, type TokenInfo } from "../services/tokens";
 import { MarketService, type MarketData } from "../services/market";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowUpRight, ArrowDownLeft, ChevronDown, ChevronUp, Shield, RefreshCw, Wallet as WalletIcon, AlertCircle } from "lucide-react";
+import {
+  ArrowUpRight,
+  ArrowDownLeft,
+  ChevronDown,
+  ChevronUp,
+  Shield,
+  RefreshCw,
+  Wallet as WalletIcon,
+  AlertCircle,
+} from "lucide-react";
 import ReceiveModal from "../components/ReceiveModal";
 import SendModal from "../components/SendModal";
 import AssetLogo from "../components/AssetLogo";
@@ -49,17 +58,19 @@ function AssetCard({
   const usdValue = React.useMemo(() => {
     if (isLoading || !marketData) return null;
     if (!balance || balance === "Error" || balance === "N/A") return 0;
-    
+
     const balanceNum = parseFloat(balance);
     if (isNaN(balanceNum) || balanceNum === 0) return 0;
-    
+
     // Try asset.symbol first, then fallback to common aliases
-    const price = marketData[asset.symbol]?.current_price || 
-                  marketData[asset.symbol === "HYPEREVM" ? "HYPE" : asset.symbol]?.current_price || 
-                  0;
-    
+    const price =
+      marketData[asset.symbol]?.current_price ||
+      marketData[asset.symbol === "HYPEREVM" ? "HYPE" : asset.symbol]
+        ?.current_price ||
+      0;
+
     if (!price || price === 0) return null;
-    
+
     return balanceNum * price;
   }, [balance, marketData, asset.symbol, isLoading]);
 
@@ -108,7 +119,10 @@ function AssetCard({
           {isLoading ? (
             <div className="h-4 w-16 bg-[var(--bg-tertiary)] rounded animate-pulse"></div>
           ) : usdValue !== null ? (
-            `≈ $${usdValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`
+            `≈ $${usdValue.toLocaleString(undefined, {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })} USD`
           ) : (
             "≈ $0.00 USD"
           )}
@@ -118,10 +132,7 @@ function AssetCard({
       <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex-shrink-0">
         <button
           onClick={onSend}
-          disabled={
-            balance === "Error" ||
-            parseFloat(balance || "0") === 0
-          }
+          disabled={balance === "Error" || parseFloat(balance || "0") === 0}
           className="p-3 bg-[var(--bg-tertiary)] rounded-xl hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           title="Send"
         >
@@ -154,45 +165,51 @@ export default function Dashboard() {
   const [hasError, setHasError] = useState(false);
 
   // Calculate total balance in USD
-  const calculateTotalBalance = useCallback(async (balanceData: Record<string, string>) => {
-    try {
-      setLoadingBalance(true);
-      
-      // Get all unique symbols from balances
-      const symbols = Object.keys(balanceData).filter(
-        symbol => balanceData[symbol] && balanceData[symbol] !== "Error" && balanceData[symbol] !== "N/A"
-      );
-      
-      if (symbols.length === 0) {
-        setTotalBalance(0);
-        setLoadingBalance(false);
-        return;
-      }
+  const calculateTotalBalance = useCallback(
+    async (balanceData: Record<string, string>) => {
+      try {
+        setLoadingBalance(true);
 
-      // Fetch prices for all symbols
-      const prices = await MarketService.getPrices(symbols);
-      
-      // Calculate total
-      let total = 0;
-      for (const symbol of symbols) {
-        const balanceStr = balanceData[symbol];
-        if (balanceStr && balanceStr !== "Error" && balanceStr !== "N/A") {
-          const balance = parseFloat(balanceStr);
-          const price = prices[symbol]?.current_price || 0;
-          if (!isNaN(balance) && !isNaN(price)) {
-            total += balance * price;
+        // Get all unique symbols from balances
+        const symbols = Object.keys(balanceData).filter(
+          symbol =>
+            balanceData[symbol] &&
+            balanceData[symbol] !== "Error" &&
+            balanceData[symbol] !== "N/A"
+        );
+
+        if (symbols.length === 0) {
+          setTotalBalance(0);
+          setLoadingBalance(false);
+          return;
+        }
+
+        // Fetch prices for all symbols
+        const prices = await MarketService.getPrices(symbols);
+
+        // Calculate total
+        let total = 0;
+        for (const symbol of symbols) {
+          const balanceStr = balanceData[symbol];
+          if (balanceStr && balanceStr !== "Error" && balanceStr !== "N/A") {
+            const balance = parseFloat(balanceStr);
+            const price = prices[symbol]?.current_price || 0;
+            if (!isNaN(balance) && !isNaN(price)) {
+              total += balance * price;
+            }
           }
         }
+
+        setTotalBalance(total);
+      } catch (e) {
+        console.error("Failed to calculate total balance:", e);
+        setTotalBalance(null);
+      } finally {
+        setLoadingBalance(false);
       }
-      
-      setTotalBalance(total);
-    } catch (e) {
-      console.error("Failed to calculate total balance:", e);
-      setTotalBalance(null);
-    } finally {
-      setLoadingBalance(false);
-    }
-  }, []);
+    },
+    []
+  );
 
   const [receiveModal, setReceiveModal] = useState<{
     isOpen: boolean;
@@ -225,16 +242,16 @@ export default function Dashboard() {
         const mockBalances = PreviewDataService.getMockBalances();
         const mockAddresses = PreviewDataService.getMockAddresses();
         const mockTokens = PreviewDataService.getMockHyperEVMTokens();
-        
+
         setBalances(mockBalances);
         setAddresses(mockAddresses);
         setHyperEVMTokens(mockTokens);
         setLoadingAssets(new Set());
-        
+
         // Get mock market data for USD calculations
         const mockMarketData = PreviewDataService.getMockMarketData();
         setMarketData(mockMarketData);
-        
+
         // Calculate total balance with mock data
         let total = 0;
         for (const [symbol, balance] of Object.entries(mockBalances)) {
@@ -279,7 +296,7 @@ export default function Dashboard() {
 
         const newBalances: Record<string, string> = {};
         const newAddresses: Record<string, string> = {};
-        
+
         // Initialize loading state for all services
         const initialLoadingAssets = new Set(services.map(s => s.symbol));
         if (isMounted) setLoadingAssets(initialLoadingAssets);
@@ -289,7 +306,7 @@ export default function Dashboard() {
           services.map(async service => {
             try {
               // Initialize wallet if it has an init method (e.g., Monero)
-              if ('init' in service && typeof service.init === 'function') {
+              if ("init" in service && typeof service.init === "function") {
                 try {
                   await service.init();
                 } catch (initError: any) {
@@ -304,7 +321,7 @@ export default function Dashboard() {
 
               const bal = await service.getBalance();
               newBalances[service.symbol] = bal;
-              
+
               // Remove from loading set when done
               if (isMounted) {
                 setLoadingAssets(prev => {
@@ -319,7 +336,7 @@ export default function Dashboard() {
               newBalances[service.symbol] = "Error";
               if (!newAddresses[service.symbol])
                 newAddresses[service.symbol] = "Address Error";
-              
+
               // Remove from loading set even on error
               if (isMounted) {
                 setLoadingAssets(prev => {
@@ -361,7 +378,10 @@ export default function Dashboard() {
         // Fetch market data for all symbols
         try {
           const allSymbols = Object.keys(newBalances).filter(
-            symbol => newBalances[symbol] && newBalances[symbol] !== "Error" && newBalances[symbol] !== "N/A"
+            symbol =>
+              newBalances[symbol] &&
+              newBalances[symbol] !== "Error" &&
+              newBalances[symbol] !== "N/A"
           );
           if (allSymbols.length > 0) {
             const prices = await MarketService.getPrices(allSymbols);
@@ -378,7 +398,7 @@ export default function Dashboard() {
         try {
           const hyperEVMService = manager.getService(SupportedChain.HYPEREVM);
           const hyperEVMAddress = await hyperEVMService.getAddress();
-          
+
           // Add HyperEVM tokens to loading set
           if (isMounted) {
             setLoadingAssets(prev => {
@@ -388,9 +408,12 @@ export default function Dashboard() {
               return next;
             });
           }
-          
+
           // Add timeout for token loading
-          const tokenLoadPromise = TokenService.getHyperEVMTokens(hyperEVMAddress, true);
+          const tokenLoadPromise = TokenService.getHyperEVMTokens(
+            hyperEVMAddress,
+            true
+          );
           const tokens = await Promise.race([
             tokenLoadPromise,
             new Promise<TokenInfo[]>((_, reject) =>
@@ -398,13 +421,15 @@ export default function Dashboard() {
             ),
           ]).catch(() => {
             // Return at least HYPE token on timeout
-            return [{
-              address: "0x0000000000000000000000000000000000000000",
-              symbol: "HYPE",
-              name: "HyperEVM",
-              decimals: 18,
-              balance: "0.00",
-            }];
+            return [
+              {
+                address: "0x0000000000000000000000000000000000000000",
+                symbol: "HYPE",
+                name: "HyperEVM",
+                decimals: 18,
+                balance: "0.00",
+              },
+            ];
           });
 
           if (!isMounted) return;
@@ -431,7 +456,10 @@ export default function Dashboard() {
           if (isMounted) {
             try {
               const allSymbols = Object.keys(newBalances).filter(
-                symbol => newBalances[symbol] && newBalances[symbol] !== "Error" && newBalances[symbol] !== "N/A"
+                symbol =>
+                  newBalances[symbol] &&
+                  newBalances[symbol] !== "Error" &&
+                  newBalances[symbol] !== "N/A"
               );
               if (allSymbols.length > 0) {
                 const prices = await MarketService.getPrices(allSymbols);
@@ -450,7 +478,10 @@ export default function Dashboard() {
           const hyperEVMService = manager.getService(SupportedChain.HYPEREVM);
           try {
             // Try to initialize if needed
-            if ('init' in hyperEVMService && typeof hyperEVMService.init === 'function') {
+            if (
+              "init" in hyperEVMService &&
+              typeof hyperEVMService.init === "function"
+            ) {
               try {
                 await hyperEVMService.init();
               } catch (initError) {
@@ -459,13 +490,15 @@ export default function Dashboard() {
               }
             }
             const hyperEVMAddress = await hyperEVMService.getAddress();
-            setHyperEVMTokens([{
-              address: "0x0000000000000000000000000000000000000000",
-              symbol: "HYPE",
-              name: "HyperEVM",
-              decimals: 18,
-              balance: "0.00",
-            }]);
+            setHyperEVMTokens([
+              {
+                address: "0x0000000000000000000000000000000000000000",
+                symbol: "HYPE",
+                name: "HyperEVM",
+                decimals: 18,
+                balance: "0.00",
+              },
+            ]);
             setBalances(prev => ({ ...prev, HYPE: "0.00" }));
             setAddresses(prev => ({ ...prev, HYPE: hyperEVMAddress }));
             // Remove HYPE from loading
@@ -497,7 +530,7 @@ export default function Dashboard() {
       }
     };
 
-    await loadData();
+    loadData();
 
     // Refresh when active wallet changes (polling approach)
     const interval = setInterval(() => {
@@ -605,21 +638,32 @@ export default function Dashboard() {
             className="p-3 bg-[var(--bg-secondary)] hover:bg-[var(--hover-bg)] border border-[var(--border-primary)] rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title="Refresh balances"
           >
-            <RefreshCw size={20} className={`text-[var(--text-primary)] ${isRefreshing ? "animate-spin" : ""}`} />
+            <RefreshCw
+              size={20}
+              className={`text-[var(--text-primary)] ${
+                isRefreshing ? "animate-spin" : ""
+              }`}
+            />
           </button>
-        <div className="text-right">
-          {loadingBalance ? (
-            <div className="h-8 w-32 bg-[var(--bg-tertiary)] rounded animate-pulse"></div>
-          ) : (
-            <div>
-              <div className="text-3xl font-bold tracking-tight">
-                ${totalBalance !== null ? totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0.00"}
+          <div className="text-right">
+            {loadingBalance ? (
+              <div className="h-8 w-32 bg-[var(--bg-tertiary)] rounded animate-pulse"></div>
+            ) : (
+              <div>
+                <div className="text-3xl font-bold tracking-tight">
+                  $
+                  {totalBalance !== null
+                    ? totalBalance.toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })
+                    : "0.00"}
+                </div>
+                <div className="text-xs text-[var(--text-secondary)] mt-1">
+                  Total Balance
+                </div>
               </div>
-              <div className="text-xs text-[var(--text-secondary)] mt-1">
-                Total Balance
-              </div>
-            </div>
-          )}
+            )}
           </div>
         </div>
       </div>
@@ -630,10 +674,18 @@ export default function Dashboard() {
           animate={{ opacity: 1, y: 0 }}
           className="p-4 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-xl flex items-center gap-3 transition-colors"
         >
-          <AlertCircle size={20} className="text-red-500 dark:text-red-400 flex-shrink-0" />
+          <AlertCircle
+            size={20}
+            className="text-red-500 dark:text-red-400 flex-shrink-0"
+          />
           <div className="flex-1">
-            <p className="text-sm font-bold text-red-700 dark:text-red-400">Failed to load some balances</p>
-            <p className="text-xs text-red-600 dark:text-red-500 mt-1">Some assets may not be displayed correctly. Click refresh to try again.</p>
+            <p className="text-sm font-bold text-red-700 dark:text-red-400">
+              Failed to load some balances
+            </p>
+            <p className="text-xs text-red-600 dark:text-red-500 mt-1">
+              Some assets may not be displayed correctly. Click refresh to try
+              again.
+            </p>
           </div>
           <button
             onClick={refreshBalances}
@@ -644,33 +696,41 @@ export default function Dashboard() {
         </motion.div>
       )}
 
-      {Object.keys(balances).length === 0 && hyperEVMAssets.length === 0 && baseChains.length === 0 && privacyCoins.length === 0 && !loadingAssets.size && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-center py-20 bg-[var(--bg-secondary)] rounded-3xl border border-[var(--border-primary)] transition-colors"
-        >
-          <WalletIcon size={64} className="mx-auto mb-6 text-[var(--text-tertiary)]" />
-          <h2 className="text-2xl font-bold mb-2">No Assets Found</h2>
-          <p className="text-[var(--text-secondary)] mb-6 max-w-md mx-auto">
-            Your portfolio is empty. Start by receiving some assets or swap to get started.
-          </p>
-          <div className="flex gap-4 justify-center">
-            <button
-              onClick={() => window.location.href = "/swap"}
-              className="px-6 py-3 bg-hyper-green text-black rounded-xl font-bold hover:bg-hyper-dark transition-colors"
-            >
-              Go to Swap
-            </button>
-            <button
-              onClick={refreshBalances}
-              className="px-6 py-3 bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-xl font-bold hover:bg-[var(--hover-bg)] border border-[var(--border-primary)] transition-colors"
-            >
-              Refresh
-            </button>
-          </div>
-        </motion.div>
-      )}
+      {Object.keys(balances).length === 0 &&
+        hyperEVMAssets.length === 0 &&
+        baseChains.length === 0 &&
+        privacyCoins.length === 0 &&
+        !loadingAssets.size && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-center py-20 bg-[var(--bg-secondary)] rounded-3xl border border-[var(--border-primary)] transition-colors"
+          >
+            <WalletIcon
+              size={64}
+              className="mx-auto mb-6 text-[var(--text-tertiary)]"
+            />
+            <h2 className="text-2xl font-bold mb-2">No Assets Found</h2>
+            <p className="text-[var(--text-secondary)] mb-6 max-w-md mx-auto">
+              Your portfolio is empty. Start by receiving some assets or swap to
+              get started.
+            </p>
+            <div className="flex gap-4 justify-center">
+              <button
+                onClick={() => (window.location.href = "/swap")}
+                className="px-6 py-3 bg-hyper-green text-black rounded-xl font-bold hover:bg-hyper-dark transition-colors"
+              >
+                Go to Swap
+              </button>
+              <button
+                onClick={refreshBalances}
+                className="px-6 py-3 bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-xl font-bold hover:bg-[var(--hover-bg)] border border-[var(--border-primary)] transition-colors"
+              >
+                Refresh
+              </button>
+            </div>
+          </motion.div>
+        )}
 
       <div className="flex flex-col gap-4">
         {/* HyperEVM Category Section */}
@@ -692,14 +752,21 @@ export default function Dashboard() {
                 <div className="text-left">
                   <div className="font-bold text-lg">HyperEVM</div>
                   <div className="text-xs text-[var(--text-secondary)]">
-                    {hyperEVMAssets.length} token{hyperEVMAssets.length !== 1 ? "s" : ""}
+                    {hyperEVMAssets.length} token
+                    {hyperEVMAssets.length !== 1 ? "s" : ""}
                   </div>
                 </div>
               </div>
               {isHyperEVMExpanded ? (
-                <ChevronUp size={20} className="text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors" />
+                <ChevronUp
+                  size={20}
+                  className="text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors"
+                />
               ) : (
-                <ChevronDown size={20} className="text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors" />
+                <ChevronDown
+                  size={20}
+                  className="text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors"
+                />
               )}
             </button>
 
@@ -740,7 +807,8 @@ export default function Dashboard() {
                             });
 
                             try {
-                              const activeWallet = WalletService.getActiveWallet();
+                              const activeWallet =
+                                WalletService.getActiveWallet();
                               if (!activeWallet) {
                                 setReceiveModal(prev => ({
                                   ...prev,
@@ -762,7 +830,8 @@ export default function Dashboard() {
                                 return;
                               }
 
-                              const enabledNetworks = NetworkService.getEnabledNetworks();
+                              const enabledNetworks =
+                                NetworkService.getEnabledNetworks();
                               const manager = new ChainManager(
                                 privKey || undefined,
                                 !!privKey,
@@ -770,16 +839,21 @@ export default function Dashboard() {
                                 enabledNetworks
                               );
 
-                              const service = manager.getService(asset.chainKey);
-                              
+                              const service = manager.getService(
+                                asset.chainKey
+                              );
+
                               // Check if service has init method and initialize if needed
-                              if ('init' in service && typeof service.init === 'function') {
+                              if (
+                                "init" in service &&
+                                typeof service.init === "function"
+                              ) {
                                 setReceiveModal(prev => ({
                                   ...prev,
                                   address: `Initializing ${asset.name} wallet...`,
                                   loading: true,
                                 }));
-                                
+
                                 try {
                                   await service.init();
                                   setReceiveModal(prev => ({
@@ -788,24 +862,31 @@ export default function Dashboard() {
                                     loading: true,
                                   }));
                                   // Small delay to show success message
-                                  await new Promise(resolve => setTimeout(resolve, 1000));
+                                  await new Promise(resolve =>
+                                    setTimeout(resolve, 1000)
+                                  );
                                 } catch (initError: any) {
-                                  console.error("Failed to initialize wallet:", initError);
+                                  console.error(
+                                    "Failed to initialize wallet:",
+                                    initError
+                                  );
                                   setReceiveModal(prev => ({
                                     ...prev,
-                                    address: `Initialization failed: ${initError.message || 'Unknown error'}`,
+                                    address: `Initialization failed: ${
+                                      initError.message || "Unknown error"
+                                    }`,
                                     loading: false,
                                   }));
                                   return;
                                 }
                               }
-                              
+
                               setReceiveModal(prev => ({
                                 ...prev,
                                 address: "Getting address...",
                                 loading: true,
                               }));
-                              
+
                               address = await service.getAddress();
 
                               setAddresses(prev => ({
@@ -904,15 +985,15 @@ export default function Dashboard() {
                   );
 
                   const service = manager.getService(asset.chainKey);
-                  
+
                   // Check if service has init method and initialize if needed
-                  if ('init' in service && typeof service.init === 'function') {
+                  if ("init" in service && typeof service.init === "function") {
                     setReceiveModal(prev => ({
                       ...prev,
                       address: `Initializing ${asset.name} wallet...`,
                       loading: true,
                     }));
-                    
+
                     try {
                       await service.init();
                       setReceiveModal(prev => ({
@@ -926,19 +1007,21 @@ export default function Dashboard() {
                       console.error("Failed to initialize wallet:", initError);
                       setReceiveModal(prev => ({
                         ...prev,
-                        address: `Initialization failed: ${initError.message || 'Unknown error'}`,
+                        address: `Initialization failed: ${
+                          initError.message || "Unknown error"
+                        }`,
                         loading: false,
                       }));
                       return;
                     }
                   }
-                  
+
                   setReceiveModal(prev => ({
                     ...prev,
                     address: "Getting address...",
                     loading: true,
                   }));
-                  
+
                   address = await service.getAddress();
 
                   setAddresses(prev => ({
@@ -946,10 +1029,7 @@ export default function Dashboard() {
                     [asset.symbol]: address,
                   }));
                 } catch (e) {
-                  console.error(
-                    `Failed to get ${asset.symbol} address:`,
-                    e
-                  );
+                  console.error(`Failed to get ${asset.symbol} address:`, e);
                   address = "Address Error";
                 }
 
@@ -968,7 +1048,6 @@ export default function Dashboard() {
                 });
               }
             }}
-            animationIndex={i}
           />
         ))}
 
@@ -988,7 +1067,8 @@ export default function Dashboard() {
                 <div className="text-left">
                   <div className="font-bold text-lg">Privacy Coins</div>
                   <div className="text-xs text-[var(--text-secondary)]">
-                    {privacyCoins.length} coin{privacyCoins.length !== 1 ? "s" : ""}
+                    {privacyCoins.length} coin
+                    {privacyCoins.length !== 1 ? "s" : ""}
                   </div>
                 </div>
               </div>
@@ -1046,7 +1126,8 @@ export default function Dashboard() {
                           return;
                         }
 
-                        const enabledNetworks = NetworkService.getEnabledNetworks();
+                        const enabledNetworks =
+                          NetworkService.getEnabledNetworks();
                         const manager = new ChainManager(
                           privKey || undefined,
                           !!privKey,
@@ -1055,15 +1136,18 @@ export default function Dashboard() {
                         );
 
                         const service = manager.getService(asset.chainKey);
-                        
+
                         // Check if service has init method and initialize if needed
-                        if ('init' in service && typeof service.init === 'function') {
+                        if (
+                          "init" in service &&
+                          typeof service.init === "function"
+                        ) {
                           setReceiveModal(prev => ({
                             ...prev,
                             address: `Initializing ${asset.name} wallet...`,
                             loading: true,
                           }));
-                          
+
                           try {
                             await service.init();
                             setReceiveModal(prev => ({
@@ -1071,23 +1155,27 @@ export default function Dashboard() {
                               address: `${asset.name} wallet initialized successfully!`,
                               loading: true,
                             }));
-                            await new Promise(resolve => setTimeout(resolve, 1000));
+                            await new Promise(resolve =>
+                              setTimeout(resolve, 1000)
+                            );
                           } catch (initError: any) {
                             setReceiveModal(prev => ({
                               ...prev,
-                              address: `Initialization failed: ${initError.message || 'Unknown error'}`,
+                              address: `Initialization failed: ${
+                                initError.message || "Unknown error"
+                              }`,
                               loading: false,
                             }));
                             return;
                           }
                         }
-                        
+
                         setReceiveModal(prev => ({
                           ...prev,
                           address: "Getting address...",
                           loading: true,
                         }));
-                        
+
                         address = await service.getAddress();
 
                         setAddresses(prev => ({

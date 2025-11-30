@@ -56,17 +56,156 @@ describe("ZCashChainService", () => {
     }, 10000); // Increase timeout for retry logic
 
     it("should try multiple API endpoints on failure", async () => {
+      // First API (Tatum) - all formats fail
       (global.fetch as any)
-        .mockRejectedValueOnce(new Error("First API failed"))
-        .mockRejectedValueOnce(new Error("Second API failed"))
+        .mockRejectedValueOnce(new Error("First API format 1 failed"))
+        .mockRejectedValueOnce(new Error("First API format 2 failed"))
+        .mockRejectedValueOnce(new Error("First API format 3 failed"))
+        // Second API (Blockchair) - format 1 fails, format 2 succeeds
+        .mockRejectedValueOnce(new Error("Second API format 1 failed"))
         .mockResolvedValueOnce({
           ok: true,
-          json: async () => ({ balance: 50000000 }),
+          json: async () => ({ balance: 50000000 }), // 0.5 ZEC in satoshis
         });
 
       const balance = await service.getBalance();
       expect(balance).toBe("0.50000000");
+    }, 15000);
+
+    it("should handle Tatum REST API format (primary endpoint)", async () => {
+      // The service tries multiple formats for each API URL
+      // Tatum is the first API, so we need to mock all its format attempts
+      (global.fetch as any)
+        // Tatum API URL - format 1: /address/{address}
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 404,
+        })
+        // Tatum API URL - format 2: /addr/{address}
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 404,
+        })
+        // Tatum API URL - format 3: /address/{address}/balance (Tatum specific)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            balance: 1.5, // Direct ZEC value
+          }),
+        });
+
+      const balance = await service.getBalance();
+      expect(balance).toBe("1.50000000");
     });
+
+    it("should handle Tatum REST API format with balanceSat", async () => {
+      // Tatum format: balanceSat in satoshis
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          balanceSat: 250000000, // 2.5 ZEC in satoshis
+        }),
+      });
+
+      const balance = await service.getBalance();
+      expect(balance).toBe("2.50000000");
+    });
+
+    it("should fallback to Blockchair when Tatum fails", async () => {
+      const address = await service.getAddress();
+      
+      // Mock: Tatum fails completely (all formats), Blockchair succeeds
+      // Retry logic retries 2 times, so we need to mock all attempts
+      let tatumCallCount = 0;
+      let blockchairCallCount = 0;
+      
+      (global.fetch as any).mockImplementation((url: string) => {
+        // Tatum API - all formats fail (retried 2 times)
+        if (url.includes("tatum.io")) {
+          tatumCallCount++;
+          // After all Tatum retries fail, move to Blockchair
+          if (tatumCallCount > 12) {
+            // Now try Blockchair
+            if (url.includes("blockchair.com") && url.includes("/dashboards/address/")) {
+              return Promise.resolve({
+                ok: true,
+                json: async () => ({
+                  data: {
+                    [address]: {
+                      address: {
+                        balance: 100000000, // 1 ZEC in satoshis
+                      },
+                    },
+                  },
+                }),
+              });
+            }
+            if (url.includes("blockchair.com")) {
+              return Promise.resolve({ ok: false, status: 404 });
+            }
+          }
+          return Promise.resolve({ ok: false, status: 404 });
+        }
+        // Blockchair API - format 4 succeeds
+        if (url.includes("blockchair.com") && url.includes("/dashboards/address/")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              data: {
+                [address]: {
+                  address: {
+                    balance: 100000000, // 1 ZEC in satoshis
+                  },
+                },
+              },
+            }),
+          });
+        }
+        // Blockchair other formats fail
+        if (url.includes("blockchair.com")) {
+          return Promise.resolve({ ok: false, status: 404 });
+        }
+        return Promise.resolve({ ok: false, status: 404 });
+      });
+
+      const balance = await service.getBalance();
+      expect(balance).toBe("1.00000000");
+    }, 30000);
+
+    it("should handle Blockchair API format (fallback)", async () => {
+      // Blockchair format: data[address].address.balance
+      const address = await service.getAddress();
+      
+      (global.fetch as any).mockImplementation((url: string) => {
+        // Tatum API - all formats fail
+        if (url.includes("tatum.io")) {
+          return Promise.resolve({ ok: false, status: 404 });
+        }
+        // Blockchair API - format 4 succeeds
+        if (url.includes("blockchair.com") && url.includes("/dashboards/address/")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              data: {
+                [address]: {
+                  address: {
+                    balance: 500000000, // 5 ZEC in satoshis
+                  },
+                },
+              },
+            }),
+          });
+        }
+        // Blockchair other formats fail
+        if (url.includes("blockchair.com")) {
+          return Promise.resolve({ ok: false, status: 404 });
+        }
+        return Promise.resolve({ ok: false, status: 404 });
+      });
+
+      const balance = await service.getBalance();
+      expect(balance).toBe("5.00000000");
+    }, 20000);
 
     it("should handle different API response formats", async () => {
       // Test format 1: chain_stats format (like mempool.space)
@@ -83,7 +222,7 @@ describe("ZCashChainService", () => {
       let balance = await service.getBalance();
       expect(balance).toBe("3.00000000");
 
-      // Test format 2: balance field
+      // Test format 2: balance field (satoshis)
       (global.fetch as any).mockResolvedValueOnce({
         ok: true,
         json: async () => ({ balance: 200000000 }),
@@ -113,6 +252,30 @@ describe("ZCashChainService", () => {
       balance = await service.getBalance();
       expect(balance).toBe("3.00000000");
     });
+
+    it("should handle all APIs failing and return 0.0", async () => {
+      // All APIs fail - need to mock all format attempts
+      (global.fetch as any).mockImplementation(() => {
+        return Promise.resolve({ ok: false, status: 404 });
+      });
+
+      const balance = await service.getBalance();
+      expect(balance).toBe("0.0");
+    }, 20000); // Increase timeout for retry logic
+
+    it("should handle timeout errors gracefully", async () => {
+      const controller = new AbortController();
+      controller.abort();
+      
+      (global.fetch as any).mockImplementationOnce(() => {
+        const error = new Error("Request timeout");
+        error.name = "AbortError";
+        return Promise.reject(error);
+      });
+
+      const balance = await service.getBalance();
+      expect(balance).toBe("0.0");
+    }, 15000);
   });
 
   describe("sendTransaction", () => {

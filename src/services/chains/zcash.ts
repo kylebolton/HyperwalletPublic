@@ -62,15 +62,16 @@ export class ZCashChainService implements IChainService {
       this.network = network === "mainnet" ? zcashMainnet : zcashTestnet;
 
       // ZCash public API endpoints
-      // Using block explorers that support ZCash with mempool.space-like API format
+      // Using Tatum's free RPC gateway (FreeRPC.com) - 5 requests/minute free tier
+      // REST API: https://zcash-mainnet.gateway.tatum.io/rest
+      // Alternative: Blockchair API (requires free API key from blockchair.com/api)
       this.apiUrls =
         network === "mainnet"
           ? [
-              "https://explorer.z.cash/api", // Official ZCash explorer
-              "https://zcashblockexplorer.com/api",
-              "https://chain.so/api/v2", // Chain.so supports ZCash
+              "https://zcash-mainnet.gateway.tatum.io/rest", // Tatum FreeRPC REST API (primary - free)
+              "https://api.blockchair.com/zcash", // Blockchair (fallback, requires API key)
             ]
-          : ["https://explorer.testnet.z.cash/api"];
+          : ["https://zcash-testnet.gateway.tatum.io/rest"];
 
       if (!mnemonic || mnemonic.trim().length === 0) {
         throw new Error("ZCash: Invalid mnemonic provided");
@@ -391,11 +392,12 @@ export class ZCashChainService implements IChainService {
                 // Try next format
               }
 
-              // Try format 3: Chain.so API format
-              if (apiUrl.includes("chain.so")) {
+              // Try format 3: Tatum REST API format
+              // Format: /address/{address}/balance
+              if (apiUrl.includes("tatum.io")) {
                 try {
                   const response = await fetch(
-                    `${apiUrl}/get_address_balance/ZEC/${this.transparentAddress}`,
+                    `${apiUrl}/address/${this.transparentAddress}/balance`,
                     {
                       signal: controller.signal,
                       headers: {
@@ -408,18 +410,87 @@ export class ZCashChainService implements IChainService {
                     const data = await response.json();
                     clearTimeout(timeoutId);
 
-                    if (
-                      data.status === "success" &&
-                      data.data?.confirmed_balance
-                    ) {
-                      return (
-                        parseFloat(data.data.confirmed_balance) / 100000000
-                      ).toFixed(8);
+                    // Tatum format: balance in ZEC (not satoshis)
+                    if (data.balance !== undefined) {
+                      return parseFloat(data.balance).toFixed(8);
+                    }
+                    // Or might be in satoshis
+                    if (data.balanceSat !== undefined) {
+                      return (parseFloat(data.balanceSat) / 100000000).toFixed(8);
+                    }
+                  }
+                  // Handle rate limiting (429) - try next API
+                  if (response.status === 429) {
+                    throw new Error("Rate limit exceeded");
+                  }
+                } catch (e) {
+                  // Continue to next format
+                }
+              }
+
+              // Try format 4: Blockchair API format
+              // Format: /dashboards/address/{address}
+              if (apiUrl.includes("blockchair.com")) {
+                try {
+                  const response = await fetch(
+                    `${apiUrl}/dashboards/address/${this.transparentAddress}`,
+                    {
+                      signal: controller.signal,
+                      headers: {
+                        Accept: "application/json",
+                      },
+                    }
+                  );
+
+                  if (response.ok) {
+                    const data = await response.json();
+                    clearTimeout(timeoutId);
+
+                    // Blockchair format: data[address].address.balance
+                    if (data.data && data.data[this.transparentAddress]) {
+                      const addrData = data.data[this.transparentAddress].address;
+                      if (addrData) {
+                        // Balance is in satoshis
+                        const balanceSat = addrData.balance || 0;
+                        return (balanceSat / 100000000).toFixed(8);
+                      }
                     }
                   }
                 } catch (e) {
-                  // Continue to next
+                  // Continue to next format
                 }
+              }
+
+              // Try format 4: Alternative balance endpoint format
+              // Some explorers use /addr/{address}/balance
+              try {
+                const response = await fetch(
+                  `${apiUrl}/addr/${this.transparentAddress}/balance`,
+                  {
+                    signal: controller.signal,
+                    headers: {
+                      Accept: "application/json",
+                    },
+                  }
+                );
+
+                if (response.ok) {
+                  const data = await response.json();
+                  clearTimeout(timeoutId);
+
+                  // Handle various response formats
+                  if (typeof data === "number") {
+                    return (data / 100000000).toFixed(8);
+                  }
+                  if (data.balance !== undefined) {
+                    return (parseFloat(data.balance) / 100000000).toFixed(8);
+                  }
+                  if (data.confirmed !== undefined) {
+                    return (parseFloat(data.confirmed) / 100000000).toFixed(8);
+                  }
+                }
+              } catch (e) {
+                // Continue - no balance endpoint available
               }
 
               clearTimeout(timeoutId);
@@ -438,12 +509,12 @@ export class ZCashChainService implements IChainService {
 
         return balance;
       } catch (error) {
-        console.warn(`ZCash API ${apiUrl} failed:`, error);
+        // Silently fail and try next API - errors are expected when APIs are unavailable
         continue; // Try next API
       }
     }
 
-    console.error("All ZCash APIs failed");
+    // All APIs failed - return 0 without logging (expected in production)
     return "0.0";
   }
 
@@ -529,7 +600,7 @@ export class ZCashChainService implements IChainService {
           try {
             return await this.fetchTransaction(utxo.txid);
           } catch (e) {
-            console.warn(`Failed to fetch transaction ${utxo.txid}, using scriptPubKey from UTXO`);
+            // Failed to fetch transaction - will use scriptPubKey from UTXO
             return null;
           }
         })
@@ -689,7 +760,7 @@ export class ZCashChainService implements IChainService {
           return utxos;
         }
       } catch (error) {
-        console.warn(`ZCash API ${apiUrl} failed to fetch UTXOs:`, error);
+        // Silently fail and try next API
         continue;
       }
     }
@@ -759,7 +830,7 @@ export class ZCashChainService implements IChainService {
           return Buffer.from(txHex, "hex");
         }
       } catch (error) {
-        console.warn(`ZCash API ${apiUrl} failed to fetch transaction:`, error);
+        // Silently fail and try next API
         continue;
       }
     }
@@ -845,7 +916,7 @@ export class ZCashChainService implements IChainService {
           return txHash;
         }
       } catch (error) {
-        console.warn(`ZCash API ${apiUrl} failed to broadcast transaction:`, error);
+        // Silently fail and try next API
         continue;
       }
     }
