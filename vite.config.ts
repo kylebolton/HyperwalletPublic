@@ -31,5 +31,11 @@ export default defineConfig({
   },
   optimizeDeps: {
     exclude: ['monero-ts'], // Exclude monero-ts from optimization to prevent issues
-  }
+    esbuildOptions: {
+      target: 'esnext', // Support top-level await and WASM
+    },
+  },
+  worker: {
+    format: 'es', // Use ES modules for workers (needed for WASM)
+  },
 })

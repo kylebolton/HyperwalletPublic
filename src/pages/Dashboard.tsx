@@ -308,53 +308,172 @@ export default function Dashboard() {
               // Initialize wallet if it has an init method (e.g., Monero)
               if ("init" in service && typeof service.init === "function") {
                 try {
-                  await service.init();
+                  // For Monero, give much more time (90 seconds) due to remote node connections
+                  // For other services, use 30 seconds
+                  const initTimeout = service.symbol === "XMR" ? 90000 : 30000;
+                  
+                  await Promise.race([
+                    service.init(),
+                    new Promise((_, reject) =>
+                      setTimeout(() => reject(new Error("Init timeout")), initTimeout)
+                    ),
+                  ]);
                 } catch (initError: any) {
-                  // Suppress warning during sync - it will be shown after sync completes if needed
-                  // Continue anyway - some services can still work without init
+                  // For Monero, log more details and allow retry
+                  if (service.symbol === "XMR") {
+                    console.error(`Monero initialization failed:`, initError);
+                    // Don't continue if it's a critical error (library not available)
+                    if (initError.message?.includes("not available") || initError.message?.includes("Cannot find module")) {
+                      throw initError;
+                    }
+                    // For other errors (node connection issues), continue and try to get address anyway
+                    console.warn(`Monero init failed but continuing: ${initError.message}`);
+                  } else {
+                    // Suppress warning for other services - they can still work without init
+                    console.warn(`Init failed for ${service.symbol}, continuing anyway:`, initError.message);
+                  }
                 }
               }
 
               // Fetch address first - this will validate the address
-              const addr = await service.getAddress();
-              newAddresses[service.symbol] = addr;
+              // For Monero, use longer timeout and retry logic
+              let addr: string;
+              
+              if (service.symbol === "XMR") {
+                // Monero-specific handling with retries
+                let retries = 0;
+                const maxRetries = 3;
+                const addressTimeout = 20000; // 20 seconds per attempt
+                
+                while (retries < maxRetries) {
+                  try {
+                    addr = await Promise.race([
+                      service.getAddress(),
+                      new Promise<string>((_, reject) =>
+                        setTimeout(() => reject(new Error("Address timeout")), addressTimeout)
+                      ),
+                    ]);
+                    
+                    // Check if address is valid
+                    if (addr && addr !== "Address Error" && !addr.includes("Address Error:")) {
+                      break; // Success
+                    }
+                    
+                    // If address is still invalid, wait and retry
+                    if (retries < maxRetries - 1) {
+                      console.log(`Monero address invalid, retrying... (attempt ${retries + 1}/${maxRetries})`);
+                      await new Promise(resolve => setTimeout(resolve, 3000));
+                    }
+                    retries++;
+                  } catch (addrError: any) {
+                    console.warn(`Monero address retrieval attempt ${retries + 1} failed:`, addrError.message);
+                    if (retries < maxRetries - 1) {
+                      await new Promise(resolve => setTimeout(resolve, 3000));
+                    }
+                    retries++;
+                    if (retries >= maxRetries) {
+                      addr = "Address Error";
+                    }
+                  }
+                }
+                
+                // Final check
+                if (!addr || addr === "Address Error" || addr.includes("Address Error:")) {
+                  addr = "Address Error";
+                }
+              } else {
+                // For other services, use standard timeout
+                try {
+                  addr = await Promise.race([
+                    service.getAddress(),
+                    new Promise<string>((_, reject) =>
+                      setTimeout(() => reject(new Error("Address timeout")), 15000)
+                    ),
+                  ]);
+                } catch {
+                  // Fallback to regular call without timeout
+                  addr = await service.getAddress();
+                }
+                
+                // If address is still invalid and service has init, retry once
+                if ((!addr || addr === "Address Error") && "init" in service && typeof service.init === "function") {
+                  await new Promise(resolve => setTimeout(resolve, 2000));
+                  addr = await service.getAddress();
+                }
+              }
+
+              newAddresses[service.symbol] = addr || "Address Error";
 
               const bal = await service.getBalance();
               newBalances[service.symbol] = bal;
 
-              // Remove from loading set when done
+              // Only remove from loading set when address is valid
               if (isMounted) {
                 setLoadingAssets(prev => {
                   const next = new Set(prev);
-                  next.delete(service.symbol);
+                  // Keep in loading if address is still invalid
+                  // For Monero, be more strict - only remove if address is definitely valid
+                  if (addr && addr !== "Address Error" && addr !== "Loading..." && !addr.includes("Address Error:")) {
+                    next.delete(service.symbol);
+                  } else if (service.symbol === "XMR") {
+                    // For Monero, keep in loading state if address is invalid
+                    // This allows the UI to show loading spinner
+                    console.log(`Monero address still invalid, keeping in loading state: ${addr}`);
+                  }
                   return next;
                 });
               }
             } catch (e: any) {
               console.error(`Failed to load ${service.symbol}:`, e);
-              // Gracefully handle errors - show error state (same for all chains)
-              newBalances[service.symbol] = "Error";
-              if (!newAddresses[service.symbol])
-                newAddresses[service.symbol] = "Address Error";
+              
+              // For Monero, be more graceful - show 0.0 balance instead of "Error"
+              // This is because monero-ts may not work in all browser environments
+              if (service.symbol === "XMR") {
+                console.warn(`Monero loading failed, using fallback values:`, e.message);
+                newBalances[service.symbol] = "0.0";
+                if (!newAddresses[service.symbol]) {
+                  // Try to get address anyway - it might work even if balance doesn't
+                  try {
+                    const fallbackAddr = await service.getAddress();
+                    if (fallbackAddr && !fallbackAddr.includes("Address Error")) {
+                      newAddresses[service.symbol] = fallbackAddr;
+                    } else {
+                      newAddresses[service.symbol] = "Address Error";
+                    }
+                  } catch {
+                    newAddresses[service.symbol] = "Address Error";
+                  }
+                }
+              } else {
+                // For other chains, show error state
+                newBalances[service.symbol] = "Error";
+                if (!newAddresses[service.symbol])
+                  newAddresses[service.symbol] = "Address Error";
+              }
 
-              // Remove from loading set even on error
+              // Remove from loading set even on error (after a longer delay for Monero)
               if (isMounted) {
-                setLoadingAssets(prev => {
-                  const next = new Set(prev);
-                  next.delete(service.symbol);
-                  return next;
-                });
+                // For Monero, keep loading longer in case it's still initializing
+                const delay = service.symbol === "XMR" ? 10000 : 0;
+                setTimeout(() => {
+                  setLoadingAssets(prev => {
+                    const next = new Set(prev);
+                    next.delete(service.symbol);
+                    return next;
+                  });
+                }, delay);
               }
             }
           })
         );
 
         // Race between loading and timeout
+        // Use longer timeout to accommodate Monero initialization (120 seconds)
         try {
           await Promise.race([
             loadPromise,
             new Promise((_, reject) =>
-              setTimeout(() => reject(new Error("Load timeout")), 10000)
+              setTimeout(() => reject(new Error("Load timeout")), 120000)
             ),
           ]);
         } catch (e) {
@@ -409,7 +528,7 @@ export default function Dashboard() {
             });
           }
 
-          // Add timeout for token loading
+          // Add timeout for token loading (increased to 30 seconds for better discovery)
           const tokenLoadPromise = TokenService.getHyperEVMTokens(
             hyperEVMAddress,
             true
@@ -417,7 +536,7 @@ export default function Dashboard() {
           const tokens = await Promise.race([
             tokenLoadPromise,
             new Promise<TokenInfo[]>((_, reject) =>
-              setTimeout(() => reject(new Error("Token load timeout")), 8000)
+              setTimeout(() => reject(new Error("Token load timeout")), 30000)
             ),
           ]).catch(() => {
             // Return at least HYPE token on timeout
@@ -599,23 +718,60 @@ export default function Dashboard() {
     },
   ];
 
-  // Convert HyperEVM tokens to assets
-  const hyperEVMAssets: Asset[] = hyperEVMTokens.map(token => ({
-    symbol: token.symbol,
-    name: token.name || token.symbol,
-    color: "#00FF9D",
-    chainKey: SupportedChain.HYPEREVM,
-  }));
-
-  // Ensure HYPE is always present
-  const hasHYPE = hyperEVMAssets.some(asset => asset.symbol === "HYPE");
-  if (!hasHYPE && !loadingAssets.has("HYPE")) {
-    hyperEVMAssets.unshift({
-      symbol: "HYPE",
-      name: "HyperEVM",
+  // Convert HyperEVM tokens to assets and sort by USD value
+  const hyperEVMAssets: Asset[] = [...hyperEVMTokens]
+    .sort((tokenA, tokenB) => {
+      // Sort by USD value (highest first)
+      const balanceA = parseFloat(balances[tokenA.symbol] || "0");
+      const balanceB = parseFloat(balances[tokenB.symbol] || "0");
+      
+      // Get USD values
+      const priceA = marketData[tokenA.symbol]?.current_price || 0;
+      const priceB = marketData[tokenB.symbol]?.current_price || 0;
+      const usdValueA = balanceA * priceA;
+      const usdValueB = balanceB * priceB;
+      
+      // First, separate tokens with balance > 0 from zero-balance tokens
+      const hasBalanceA = balanceA > 0;
+      const hasBalanceB = balanceB > 0;
+      
+      if (hasBalanceA && !hasBalanceB) return -1;
+      if (!hasBalanceA && hasBalanceB) return 1;
+      
+      // Within each group, sort by USD value
+      if (hasBalanceA && hasBalanceB) {
+        return usdValueB - usdValueA;
+      }
+      
+      // For zero-balance tokens, sort alphabetically
+      return tokenA.symbol.localeCompare(tokenB.symbol);
+    })
+    .map(token => ({
+      symbol: token.symbol,
+      name: token.name || token.symbol,
       color: "#00FF9D",
       chainKey: SupportedChain.HYPEREVM,
-    });
+    }));
+
+  // Ensure HYPE is always present and at the top if it has balance
+  const hasHYPE = hyperEVMAssets.some(asset => asset.symbol === "HYPE");
+  if (!hasHYPE && !loadingAssets.has("HYPE")) {
+    const hypeBalance = parseFloat(balances["HYPE"] || "0");
+    if (hypeBalance > 0) {
+      hyperEVMAssets.unshift({
+        symbol: "HYPE",
+        name: "HyperEVM",
+        color: "#00FF9D",
+        chainKey: SupportedChain.HYPEREVM,
+      });
+    } else {
+      hyperEVMAssets.push({
+        symbol: "HYPE",
+        name: "HyperEVM",
+        color: "#00FF9D",
+        chainKey: SupportedChain.HYPEREVM,
+      });
+    }
   }
 
   const activeWallet = WalletService.getActiveWallet();
@@ -752,8 +908,17 @@ export default function Dashboard() {
                 <div className="text-left">
                   <div className="font-bold text-lg">HyperEVM</div>
                   <div className="text-xs text-[var(--text-secondary)]">
-                    {hyperEVMAssets.length} token
-                    {hyperEVMAssets.length !== 1 ? "s" : ""}
+                    {hyperEVMTokens.length} token
+                    {hyperEVMTokens.length !== 1 ? "s" : ""}
+                    {hyperEVMTokens.length > 0 && (
+                      <span className="ml-2">
+                        (
+                        {hyperEVMTokens.filter(
+                          token => parseFloat(balances[token.symbol] || "0") > 0
+                        ).length}{" "}
+                        with balance)
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -780,9 +945,23 @@ export default function Dashboard() {
                   transition={{ duration: 0.3, ease: "easeInOut" }}
                   className="overflow-hidden"
                 >
-                  <div className="border-t border-[var(--border-primary)] divide-y divide-[var(--border-primary)]">
-                    {hyperEVMAssets.map((asset, i) => (
-                      <AssetCard
+                  <div className="border-t border-[var(--border-primary)]">
+                    {hyperEVMAssets.length === 0 && loadingAssets.has("HYPE") ? (
+                      <div className="p-6 text-center text-[var(--text-secondary)]">
+                        <div className="h-8 w-24 bg-[var(--bg-tertiary)] rounded animate-pulse mx-auto mb-2"></div>
+                        <div className="text-sm">Loading tokens...</div>
+                      </div>
+                    ) : hyperEVMAssets.length === 0 ? (
+                      <div className="p-6 text-center text-[var(--text-secondary)]">
+                        <div className="text-sm">No tokens found</div>
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-[var(--border-primary)]">
+                        {hyperEVMAssets.map((asset, i) => {
+                          const balance = parseFloat(balances[asset.symbol] || "0");
+                          const hasBalance = balance > 0;
+                          return (
+                            <AssetCard
                         key={asset.symbol}
                         asset={asset}
                         balance={balances[asset.symbol]}
@@ -855,29 +1034,53 @@ export default function Dashboard() {
                                 }));
 
                                 try {
-                                  await service.init();
-                                  setReceiveModal(prev => ({
-                                    ...prev,
-                                    address: `${asset.name} wallet initialized successfully!`,
-                                    loading: true,
-                                  }));
-                                  // Small delay to show success message
-                                  await new Promise(resolve =>
-                                    setTimeout(resolve, 1000)
-                                  );
+                                  // For services that need init (like Monero), give more time
+                                  let initSuccess = false;
+                                  for (let attempt = 0; attempt < 2; attempt++) {
+                                    try {
+                                      await Promise.race([
+                                        service.init(),
+                                        new Promise((_, reject) =>
+                                          setTimeout(() => reject(new Error("Init timeout")), 30000)
+                                        ),
+                                      ]);
+                                      initSuccess = true;
+                                      break;
+                                    } catch (initError: any) {
+                                      if (attempt === 0) {
+                                        setReceiveModal(prev => ({
+                                          ...prev,
+                                          address: `Retrying ${asset.name} wallet initialization...`,
+                                          loading: true,
+                                        }));
+                                        await new Promise(resolve => setTimeout(resolve, 2000));
+                                      } else {
+                                        throw initError;
+                                      }
+                                    }
+                                  }
+
+                                  if (initSuccess) {
+                                    setReceiveModal(prev => ({
+                                      ...prev,
+                                      address: `${asset.name} wallet initialized successfully!`,
+                                      loading: true,
+                                    }));
+                                    await new Promise(resolve =>
+                                      setTimeout(resolve, 1000)
+                                    );
+                                  }
                                 } catch (initError: any) {
                                   console.error(
                                     "Failed to initialize wallet:",
                                     initError
                                   );
+                                  // Don't return - try to get address anyway
                                   setReceiveModal(prev => ({
                                     ...prev,
-                                    address: `Initialization failed: ${
-                                      initError.message || "Unknown error"
-                                    }`,
-                                    loading: false,
+                                    address: `Getting address (initialization may have failed)...`,
+                                    loading: true,
                                   }));
-                                  return;
                                 }
                               }
 
@@ -887,26 +1090,66 @@ export default function Dashboard() {
                                 loading: true,
                               }));
 
-                              address = await service.getAddress();
+                              // Try to get address with timeout and retry
+                              try {
+                                address = await Promise.race([
+                                  service.getAddress(),
+                                  new Promise<string>((_, reject) =>
+                                    setTimeout(() => reject(new Error("Address timeout")), 15000)
+                                  ),
+                                ]);
 
-                              setAddresses(prev => ({
-                                ...prev,
-                                [asset.symbol]: address,
-                              }));
+                                // Validate address
+                                if (address && address !== "Address Error" && address !== "Loading...") {
+                                  setAddresses(prev => ({
+                                    ...prev,
+                                    [asset.symbol]: address,
+                                  }));
+                                  setReceiveModal({
+                                    isOpen: true,
+                                    symbol: asset.symbol,
+                                    address: address,
+                                    loading: false,
+                                  });
+                                } else {
+                                  // Retry once more
+                                  await new Promise(resolve => setTimeout(resolve, 2000));
+                                  address = await service.getAddress();
+                                  if (address && address !== "Address Error") {
+                                    setAddresses(prev => ({
+                                      ...prev,
+                                      [asset.symbol]: address,
+                                    }));
+                                    setReceiveModal({
+                                      isOpen: true,
+                                      symbol: asset.symbol,
+                                      address: address,
+                                      loading: false,
+                                    });
+                                  } else {
+                                    throw new Error("Failed to get valid address");
+                                  }
+                                }
+                              } catch (e) {
+                                console.error(
+                                  `Failed to get ${asset.symbol} address:`,
+                                  e
+                                );
+                                setReceiveModal({
+                                  isOpen: true,
+                                  symbol: asset.symbol,
+                                  address: "Address Error",
+                                  loading: false,
+                                });
+                              }
                             } catch (e) {
-                              console.error(
-                                `Failed to get ${asset.symbol} address:`,
-                                e
-                              );
-                              address = "Address Error";
+                              console.error(`Failed to process ${asset.symbol} receive:`, e);
+                              setReceiveModal(prev => ({
+                                ...prev,
+                                address: "Address Error",
+                                loading: false,
+                              }));
                             }
-
-                            setReceiveModal({
-                              isOpen: true,
-                              symbol: asset.symbol,
-                              address: address || "Address Error",
-                              loading: false,
-                            });
                           } else {
                             setReceiveModal({
                               isOpen: true,
@@ -918,7 +1161,10 @@ export default function Dashboard() {
                         }}
                         animationIndex={i}
                       />
-                    ))}
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -1149,24 +1395,51 @@ export default function Dashboard() {
                           }));
 
                           try {
-                            await service.init();
+                            // For Monero, give it more time and retry if needed
+                            let initSuccess = false;
+                            for (let attempt = 0; attempt < 2; attempt++) {
+                              try {
+                                await Promise.race([
+                                  service.init(),
+                                  new Promise((_, reject) =>
+                                    setTimeout(() => reject(new Error("Init timeout")), 30000)
+                                  ),
+                                ]);
+                                initSuccess = true;
+                                break;
+                              } catch (initError: any) {
+                                if (attempt === 0) {
+                                  // First attempt failed, wait a bit and try again
+                                  setReceiveModal(prev => ({
+                                    ...prev,
+                                    address: `Retrying ${asset.name} wallet initialization...`,
+                                    loading: true,
+                                  }));
+                                  await new Promise(resolve => setTimeout(resolve, 2000));
+                                } else {
+                                  throw initError;
+                                }
+                              }
+                            }
+
+                            if (initSuccess) {
+                              setReceiveModal(prev => ({
+                                ...prev,
+                                address: `${asset.name} wallet initialized successfully!`,
+                                loading: true,
+                              }));
+                              await new Promise(resolve =>
+                                setTimeout(resolve, 1000)
+                              );
+                            }
+                          } catch (initError: any) {
+                            console.error(`Failed to initialize ${asset.name}:`, initError);
+                            // Don't return immediately - try to get address anyway
                             setReceiveModal(prev => ({
                               ...prev,
-                              address: `${asset.name} wallet initialized successfully!`,
+                              address: `Getting address (initialization may have failed)...`,
                               loading: true,
                             }));
-                            await new Promise(resolve =>
-                              setTimeout(resolve, 1000)
-                            );
-                          } catch (initError: any) {
-                            setReceiveModal(prev => ({
-                              ...prev,
-                              address: `Initialization failed: ${
-                                initError.message || "Unknown error"
-                              }`,
-                              loading: false,
-                            }));
-                            return;
                           }
                         }
 
@@ -1176,21 +1449,66 @@ export default function Dashboard() {
                           loading: true,
                         }));
 
-                        address = await service.getAddress();
+                        // Try to get address with timeout
+                        try {
+                          address = await Promise.race([
+                            service.getAddress(),
+                            new Promise<string>((_, reject) =>
+                              setTimeout(() => reject(new Error("Address timeout")), 15000)
+                            ),
+                          ]);
 
-                        setAddresses(prev => ({
-                          ...prev,
-                          [asset.symbol]: address,
-                        }));
+                          // Validate address - if it's an error, keep trying
+                          if (address && address !== "Address Error" && address !== "Loading...") {
+                            setAddresses(prev => ({
+                              ...prev,
+                              [asset.symbol]: address,
+                            }));
+                            setReceiveModal(prev => ({
+                              ...prev,
+                              address: address,
+                              loading: false,
+                            }));
+                          } else {
+                            // Address is still invalid, keep loading
+                            setReceiveModal(prev => ({
+                              ...prev,
+                              address: "Still loading address...",
+                              loading: true,
+                            }));
+                            // Retry once more
+                            await new Promise(resolve => setTimeout(resolve, 2000));
+                            address = await service.getAddress();
+                            if (address && address !== "Address Error") {
+                              setAddresses(prev => ({
+                                ...prev,
+                                [asset.symbol]: address,
+                              }));
+                              setReceiveModal(prev => ({
+                                ...prev,
+                                address: address,
+                                loading: false,
+                              }));
+                            } else {
+                              throw new Error("Failed to get valid address");
+                            }
+                          }
+                        } catch (e) {
+                          console.error(`Failed to get ${asset.symbol} address:`, e);
+                          setReceiveModal(prev => ({
+                            ...prev,
+                            address: "Address Error",
+                            loading: false,
+                          }));
+                        }
                       } catch (e) {
-                        address = "Address Error";
+                        console.error(`Failed to get ${asset.symbol} address:`, e);
+                        setReceiveModal(prev => ({
+                          ...prev,
+                          address: "Address Error",
+                          loading: false,
+                        }));
                       }
-
-                      setReceiveModal(prev => ({
-                        ...prev,
-                        address: address || "Address Error",
-                        loading: false,
-                      }));
                     } else {
                       setReceiveModal({
                         isOpen: true,

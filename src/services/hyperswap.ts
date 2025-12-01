@@ -33,8 +33,8 @@ export class HyperSwapService {
   // Builder fee percentage (1%)
   private static readonly BUILDER_FEE_PERCENT = 0.01;
 
-  // HyperEVM RPC endpoint
-  private static readonly HYPEREVM_RPC = "https://eth.llamarpc.com";
+  // HyperEVM RPC endpoint (fallback, should use NetworkService in production)
+  private static readonly HYPEREVM_RPC = "https://rpc.hyperliquid.xyz/evm";
 
   // Standard ERC20 ABI (minimal for balance checks)
   private static readonly ERC20_ABI = [
@@ -295,6 +295,8 @@ export class HyperSwapService {
     return this.BUILDER_CODE;
   }
 }
+
+
 
 
 

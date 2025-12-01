@@ -19,8 +19,8 @@ function getDefaultNetworks(): NetworkConfig[] {
       enabled: true,
       name: "HyperEVM",
       symbol: "HYPE",
-      rpcUrl: "https://eth.llamarpc.com",
-      chainId: 1,
+      rpcUrl: "https://rpc.hyperliquid.xyz/evm",
+      chainId: 999,
       custom: false,
     },
     {

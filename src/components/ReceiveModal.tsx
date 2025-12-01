@@ -29,7 +29,10 @@ export default function ReceiveModal({
     address !== "Loading..." &&
     address !== "Address Error" &&
     address !== "No wallet" &&
-    address !== "No credentials";
+    address !== "No credentials" &&
+    !address.includes("Initializing") &&
+    !address.includes("Getting address") &&
+    !address.includes("Retrying");
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={`Receive ${symbol}`}>
@@ -39,9 +42,14 @@ export default function ReceiveModal({
             <QRCodeSVG value={address} size={200} />
           </div>
         ) : (
-          <div className="p-4 bg-[var(--bg-secondary)] rounded-xl border border-[var(--border-primary)] w-[200px] h-[200px] flex items-center justify-center transition-colors">
+          <div className="p-4 bg-[var(--bg-secondary)] rounded-xl border border-[var(--border-primary)] w-[200px] h-[200px] flex flex-col items-center justify-center transition-colors">
+            <div className="w-8 h-8 border-4 border-hyper-green border-t-transparent rounded-full animate-spin mb-2"></div>
             <p className="text-sm text-[var(--text-secondary)] text-center">
-              Loading QR code...
+              {address && address.includes("Initializing") 
+                ? address 
+                : address && address.includes("Getting address")
+                ? address
+                : "Loading QR code..."}
             </p>
           </div>
         )}
@@ -70,11 +78,16 @@ export default function ReceiveModal({
             </div>
           ) : (
             <div className="p-4 bg-[var(--bg-secondary)] rounded-xl border border-[var(--border-primary)] transition-colors">
-              <p className="text-sm font-mono text-[var(--text-secondary)]">
-                {address === "Loading..."
-                  ? "Loading address..."
-                  : address || "Loading address..."}
-              </p>
+              <div className="flex items-center justify-center gap-2">
+                <div className="w-4 h-4 border-2 border-hyper-green border-t-transparent rounded-full animate-spin"></div>
+                <p className="text-sm font-mono text-[var(--text-secondary)]">
+                  {address && (address.includes("Initializing") || address.includes("Getting address") || address.includes("Retrying"))
+                    ? address
+                    : address === "Loading..."
+                    ? "Loading address..."
+                    : address || "Loading address..."}
+                </p>
+              </div>
             </div>
           )}
         </div>

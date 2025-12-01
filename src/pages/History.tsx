@@ -3,7 +3,6 @@ import { motion } from "framer-motion";
 import { ArrowUpRight, ArrowDownLeft, RefreshCw, Filter, ArrowUpDown, History as HistoryIcon, ChevronDown } from "lucide-react";
 import { ChainManager, SupportedChain } from "../services/chains/manager";
 import { NetworkService } from "../services/networks";
-import { StorageService } from "../services/storage";
 import { WalletService } from "../services/wallet";
 import { HistoryService, type Transaction } from "../services/history";
 import { usePreviewMode } from "../contexts/PreviewModeContext";
@@ -28,8 +27,16 @@ export default function History() {
         return;
       }
 
-      const mnemonic = StorageService.getMnemonic();
-      const privKey = WalletService.getStoredPrivateKey();
+      const activeWallet = WalletService.getActiveWallet();
+
+      if (!activeWallet) {
+        setLoading(false);
+        return;
+      }
+
+      // Use active wallet's mnemonic and private key
+      const mnemonic = activeWallet.mnemonic;
+      const privKey = activeWallet.privateKey;
 
       // Support all-in-one wallet: use private key for EVM, mnemonic for non-EVM
       if (!mnemonic && !privKey) {

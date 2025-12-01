@@ -1,6 +1,7 @@
 import { ethers } from "ethers";
 import { WalletService } from "./wallet";
 import { ChainManager, SupportedChain } from "./chains/manager";
+import { NetworkService } from "./networks";
 
 export interface TokenInfo {
   address: string;
@@ -91,9 +92,8 @@ const COMMON_TOKENS: Record<
 };
 
 export class TokenService {
-  private static readonly HYPEREVM_RPC = "https://eth.llamarpc.com";
   private static readonly TOKEN_REGISTRY_URL = "https://tokens.coingecko.com/ethereum/all.json";
-  private static readonly MAX_BLOCKS_TO_SCAN = 10000; // Scan last 10k blocks for Transfer events
+  private static readonly MAX_BLOCKS_TO_SCAN = 50000; // Scan last 50k blocks for Transfer events
 
   /**
    * Scan Transfer events to discover tokens with balance > 0
@@ -120,10 +120,10 @@ export class TokenService {
         ],
       };
       
-      // Query logs with timeout
+      // Query logs with increased timeout for better discovery
       const logsPromise = provider.getLogs(filter);
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Event scan timeout")), 10000)
+        setTimeout(() => reject(new Error("Event scan timeout")), 30000)
       );
       
       const logs = await Promise.race([logsPromise, timeoutPromise]);
@@ -147,7 +147,10 @@ export class TokenService {
       };
       
       const logsFromPromise = provider.getLogs(filterFrom);
-      const logsFrom = await Promise.race([logsFromPromise, timeoutPromise]).catch(() => []);
+      const logsFromTimeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Event scan timeout")), 30000)
+      );
+      const logsFrom = await Promise.race([logsFromPromise, logsFromTimeoutPromise]).catch(() => []);
       
       for (const log of logsFrom) {
         if (log.address && ethers.isAddress(log.address)) {
@@ -163,42 +166,14 @@ export class TokenService {
   }
 
   /**
-   * Fetch token metadata from CoinGecko Token Lists
+   * Fetch token metadata from registry (deprecated - HyperEVM doesn't have a public token registry)
+   * This method is kept for potential future use but returns empty map
+   * We rely on on-chain queries for token metadata instead
    */
   private static async fetchTokenRegistry(): Promise<Map<string, { symbol: string; name: string; decimals: number; logoURI?: string }>> {
-    const tokenMap = new Map<string, { symbol: string; name: string; decimals: number; logoURI?: string }>();
-    
-    try {
-      const response = await fetch(this.TOKEN_REGISTRY_URL, {
-        headers: { Accept: "application/json" },
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Token registry fetch failed: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      
-      // Process tokens from registry
-      if (data.tokens && Array.isArray(data.tokens)) {
-        for (const token of data.tokens) {
-          if (token.address && ethers.isAddress(token.address)) {
-            const address = token.address.toLowerCase();
-            tokenMap.set(address, {
-              symbol: token.symbol || "UNKNOWN",
-              name: token.name || "Unknown Token",
-              decimals: token.decimals || 18,
-              logoURI: token.logoURI,
-            });
-          }
-        }
-      }
-    } catch (e) {
-      console.warn("Failed to fetch token registry, continuing without it:", e);
-      // Continue without registry - not critical
-    }
-    
-    return tokenMap;
+    // HyperEVM doesn't have a public token registry like Ethereum
+    // We rely on on-chain queries for token metadata
+    return new Map();
   }
 
   /**
@@ -262,7 +237,10 @@ export class TokenService {
     walletAddress: string,
     includeZeroBalance: boolean = true
   ): Promise<TokenInfo[]> {
-    const provider = new ethers.JsonRpcProvider(this.HYPEREVM_RPC);
+    // Get RPC URL from network config
+    const hyperEVMConfig = NetworkService.getNetworkConfig(SupportedChain.HYPEREVM);
+    const rpcUrl = hyperEVMConfig?.rpcUrl || "https://rpc.hyperliquid.xyz/evm";
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
     const tokens: TokenInfo[] = [];
     const processedAddresses = new Set<string>();
     const tokensWithBalance = new Set<string>();
@@ -442,7 +420,10 @@ export class TokenService {
     tokenAddress: string,
     walletAddress: string
   ): Promise<TokenInfo | null> {
-    const provider = new ethers.JsonRpcProvider(this.HYPEREVM_RPC);
+    // Get RPC URL from network config
+    const hyperEVMConfig = NetworkService.getNetworkConfig(SupportedChain.HYPEREVM);
+    const rpcUrl = hyperEVMConfig?.rpcUrl || "https://rpc.hyperliquid.xyz/evm";
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
 
     try {
       if (!ethers.isAddress(tokenAddress)) {

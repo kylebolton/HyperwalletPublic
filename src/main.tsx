@@ -17,6 +17,13 @@ if (typeof (globalThis as any).exports === 'undefined') {
   }
 }
 
+// Ensure WASM is supported
+if (typeof WebAssembly === 'undefined') {
+  console.error('WebAssembly is not supported in this browser');
+} else {
+  console.log('WebAssembly is supported');
+}
+
 // Make them available globally for libraries that expect them
 if (typeof globalThis.assert === 'undefined') {
   (globalThis as any).assert = assert;

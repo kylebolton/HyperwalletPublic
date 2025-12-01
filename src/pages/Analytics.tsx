@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { MarketService, type MarketData } from "../services/market";
-import { ChainManager } from "../services/chains/manager";
+import { ChainManager, SupportedChain } from "../services/chains/manager";
 import { NetworkService } from "../services/networks";
-import { StorageService } from "../services/storage";
 import { WalletService } from "../services/wallet";
+import { TokenService } from "../services/tokens";
 import {
   PieChart,
   Pie,
@@ -43,8 +43,16 @@ export default function Analytics() {
       }
 
       try {
-        const mnemonic = StorageService.getMnemonic();
-        const privKey = WalletService.getStoredPrivateKey();
+        const activeWallet = WalletService.getActiveWallet();
+
+        if (!activeWallet) {
+          if (isMounted) setLoading(false);
+          return;
+        }
+
+        // Use active wallet's mnemonic and private key
+        const mnemonic = activeWallet.mnemonic;
+        const privKey = activeWallet.privateKey;
 
         // Support all-in-one wallet: use private key for EVM, mnemonic for non-EVM
         if (!mnemonic && !privKey) {
@@ -61,7 +69,26 @@ export default function Analytics() {
         );
         const services = manager.getAllServices();
 
+        // Get all symbols including HyperEVM tokens
         const symbols = services.map(s => s.symbol);
+        
+        // Get HyperEVM tokens
+        let hyperEVMTokens: any[] = [];
+        try {
+          const hyperEVMService = manager.getService(SupportedChain.HYPEREVM);
+          if (hyperEVMService) {
+            const hyperEVMAddress = await hyperEVMService.getAddress();
+            hyperEVMTokens = await TokenService.getHyperEVMTokens(hyperEVMAddress, false);
+            // Add token symbols to the list for market data
+            hyperEVMTokens.forEach(token => {
+              if (!symbols.includes(token.symbol)) {
+                symbols.push(token.symbol);
+              }
+            });
+          }
+        } catch (e) {
+          console.error("Failed to load HyperEVM tokens:", e);
+        }
         
         // Add timeout for market data fetching
         const pricesPromise = MarketService.getPrices(symbols);
@@ -79,6 +106,8 @@ export default function Analytics() {
         setMarketData(prices);
 
         const newPortfolio = [];
+        
+        // Add chain service balances
         for (const service of services) {
           try {
             const balStr = await service.getBalance();
@@ -93,6 +122,23 @@ export default function Analytics() {
             }
           } catch (e) {
             console.error(`Failed to load balance for ${service.symbol}:`, e);
+          }
+        }
+
+        // Add HyperEVM token balances
+        for (const token of hyperEVMTokens) {
+          try {
+            const bal = parseFloat(token.balance || "0");
+            const price = prices[token.symbol]?.current_price || 0;
+            if (bal > 0 && price > 0) {
+              newPortfolio.push({
+                name: token.name || token.symbol,
+                symbol: token.symbol,
+                value: bal * price,
+              });
+            }
+          } catch (e) {
+            console.error(`Failed to process token ${token.symbol}:`, e);
           }
         }
 
@@ -214,10 +260,6 @@ export default function Analytics() {
         >
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-bold">Market Trends (7d)</h2>
-            <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)] bg-blue-50 dark:bg-blue-950 px-2 py-1 rounded-full border border-blue-200 dark:border-blue-800">
-              <TrendingUp size={12} />
-              Mock Data
-            </div>
           </div>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">

@@ -633,28 +633,10 @@ export default function Settings() {
               </p>
             </div>
 
-            <div className="p-6 bg-[var(--bg-secondary)] rounded-2xl border border-[var(--border-primary)] transition-colors">
-              <h3 className="font-bold text-lg mb-2">
-                Swap Integration Status
-              </h3>
-              <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-950 rounded-xl border border-green-100 dark:border-green-900 text-green-700 dark:text-green-400 transition-colors">
-                <CheckCircle2 size={20} />
-                <span className="font-bold text-sm">
-                  Swapzone Integration Active
-                </span>
-              </div>
-              <p className="mt-2 text-sm text-[var(--text-secondary)]">
-                The platform's API key is configured. All swaps will use this
-                integration.
-              </p>
-            </div>
-
             <div className="p-4 bg-blue-50 dark:bg-blue-950 rounded-xl border border-blue-100 dark:border-blue-900 transition-colors">
               <p className="text-sm text-blue-700 dark:text-blue-400">
                 <strong>Fee Structure:</strong> We charge a 1% platform fee on
-                all swaps. Additionally, the platform earns a revenue share from
-                Swapzone (0.05%-0.25% per transaction) via the integrated API
-                key.
+                all swaps.
               </p>
             </div>
 
@@ -739,35 +721,6 @@ export default function Settings() {
               </div>
             </div>
 
-            {import.meta.env.DEV && (
-              <div className="p-6 bg-[var(--bg-secondary)] rounded-2xl border border-[var(--border-primary)] transition-colors">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="font-bold text-lg mb-1">Testing Mode</h3>
-                    <p className="text-sm text-[var(--text-secondary)]">
-                      Enable testing mode for development and contract testing
-                    </p>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="sr-only peer"
-                      defaultChecked={false}
-                    />
-                    <div className="w-14 h-7 bg-[var(--bg-tertiary)] peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-hyper-green/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[4px] after:bg-[var(--bg-primary)] after:border-[var(--border-primary)] after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-hyper-green peer-checked:border-2 peer-checked:border-[var(--text-primary)] transition-colors"></div>
-                  </label>
-                </div>
-                <div className="p-3 bg-[var(--bg-tertiary)] rounded-xl border-2 border-[var(--border-secondary)] transition-colors">
-                  <p className="text-xs font-bold text-[var(--text-primary)]">
-                    Testing Mode: <span className="text-red-600">DISABLED</span>
-                  </p>
-                  <p className="text-xs text-[var(--text-secondary)] mt-1">
-                    When enabled, you can configure test contract addresses for
-                    development purposes
-                  </p>
-                </div>
-              </div>
-            )}
           </div>
         </motion.div>
       )}
