@@ -2,6 +2,11 @@
   "name": "hyperwallet",
   "private": true,
   "version": "1.0.0",
+  "description": "HyperWallet - Multi-chain cryptocurrency wallet",
+  "author": {
+    "name": "Liquyn Labs",
+    "email": "support@liquynlabs.com"
+  },
   "main": "dist-electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -37,7 +42,7 @@
     "publish": {
       "provider": "github",
       "owner": "kylebolton",
-      "repo": "HyperWallet",
+      "repo": "HyperwalletPublic",
       "releaseType": "release"
     },
     "mac": {
@@ -49,8 +54,11 @@
       "icon": "build/icons/icon.png"
     },
     "linux": {
-      "icon": "build/icons/icon.png"
-    }
+      "icon": "build/icons/icon.png",
+      "target": ["AppImage", "deb"],
+      "category": "Finance"
+    },
+    "npmRebuild": false
   },
   "dependencies": {
     "@solana/web3.js": "^1.98.4",
