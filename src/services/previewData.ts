@@ -6,20 +6,21 @@ const { SupportedChain } = ChainManager;
 export class PreviewDataService {
   static getMockBalances(): Record<string, string> {
     return {
-      BTC: '2.54321',
-      ETH: '15.789',
-      SOL: '125.45',
-      XMR: '8.92',
-      ZEC: '12.34',
-      HYPE: '1000.0',
-      USDT: '5000.0',
-      USDC: '3000.0',
-      DAI: '2000.0',
-      WBTC: '0.5',
-      WETH: '5.0',
-      UNI: '150.0',
-      LINK: '250.0',
-      AAVE: '50.0',
+      BTC: '12.54321',        // ~$564,000
+      ETH: '125.789',         // ~$352,000
+      SOL: '5250.45',         // ~$498,000
+      XMR: '1892.5',          // ~$283,875
+      ZEC: '2450.34',         // ~$85,762
+      HYPE: '1250000.0',      // ~$625,000
+      USDT: '250000.0',       // ~$250,000
+      USDC: '150000.0',       // ~$150,000
+      DAI: '100000.0',        // ~$100,000
+      WBTC: '8.5',            // ~$382,500
+      WETH: '45.0',           // ~$126,000
+      UNI: '15000.0',        // ~$127,500
+      LINK: '25000.0',       // ~$380,000
+      AAVE: '2500.0',        // ~$237,500
+      wHYPE: '500000.0',     // ~$250,000
     };
   }
 
@@ -39,6 +40,7 @@ export class PreviewDataService {
       UNI: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb',
       LINK: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb',
       AAVE: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb',
+      wHYPE: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb',
     };
   }
 
@@ -54,13 +56,26 @@ export class PreviewDataService {
     ];
 
     chains.forEach(({ chain, symbol }, chainIdx) => {
-      // Generate 3-5 transactions per chain
-      const txCount = 3 + Math.floor(Math.random() * 3);
+      // Generate 5-8 transactions per chain for more activity
+      const txCount = 5 + Math.floor(Math.random() * 4);
       for (let i = 0; i < txCount; i++) {
         const daysAgo = chainIdx * 2 + i;
         const date = new Date(now - daysAgo * 24 * 60 * 60 * 1000);
         const isReceive = Math.random() > 0.4;
-        const amount = (Math.random() * 10 + 0.1).toFixed(chain === SupportedChain.BTC ? 8 : 4);
+        
+        // Generate larger amounts matching the big balances
+        let amount: string;
+        if (symbol === 'BTC') {
+          amount = (Math.random() * 2 + 0.5).toFixed(8);
+        } else if (symbol === 'ETH') {
+          amount = (Math.random() * 20 + 5).toFixed(4);
+        } else if (symbol === 'SOL') {
+          amount = (Math.random() * 500 + 50).toFixed(2);
+        } else if (symbol === 'HYPE') {
+          amount = (Math.random() * 50000 + 10000).toFixed(2);
+        } else {
+          amount = (Math.random() * 1000 + 100).toFixed(4);
+        }
         
         transactions.push({
           id: `${chain}-${i}-${Math.random().toString(36).slice(2, 11)}`,
@@ -95,6 +110,7 @@ export class PreviewDataService {
       UNI: 8.5,
       LINK: 15.2,
       AAVE: 95.0,
+      wHYPE: 0.5, // Same as HYPE
     };
 
     return Object.entries(prices).reduce((acc, [symbol, price]) => {
@@ -139,9 +155,51 @@ export class PreviewDataService {
       { address: '0x6666666666666666666666666666666666666666', symbol: 'UNI', name: 'Uniswap', decimals: 18, balance: balances.UNI || '0' },
       { address: '0x7777777777777777777777777777777777777777', symbol: 'LINK', name: 'Chainlink', decimals: 18, balance: balances.LINK || '0' },
       { address: '0x8888888888888888888888888888888888888888', symbol: 'AAVE', name: 'Aave', decimals: 18, balance: balances.AAVE || '0' },
+      { address: '0x9999999999999999999999999999999999999999', symbol: 'wHYPE', name: 'Wrapped HYPE', decimals: 18, balance: balances.wHYPE || '0' },
     ];
 
     return tokens.filter(t => parseFloat(t.balance) > 0);
+  }
+
+  /**
+   * Get a fake wallet object for preview mode
+   * This creates a mock wallet with fake credentials for demonstration
+   */
+  static getMockWallet(): {
+    id: string;
+    name: string;
+    mnemonic: string;
+    privateKey: string;
+    createdAt: number;
+    isActive: boolean;
+  } {
+    return {
+      id: 'preview-wallet-001',
+      name: 'Demo Wallet',
+      mnemonic: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art',
+      privateKey: '0x0000000000000000000000000000000000000000000000000000000000000001',
+      createdAt: Date.now() - 30 * 24 * 60 * 60 * 1000, // 30 days ago
+      isActive: true,
+    };
+  }
+
+  /**
+   * Format balance with commas for display
+   */
+  static formatBalance(balance: string): string {
+    const num = parseFloat(balance);
+    if (isNaN(num)) return balance;
+    
+    // Format with commas for large numbers
+    if (num >= 1000) {
+      return num.toLocaleString('en-US', {
+        maximumFractionDigits: 8,
+        minimumFractionDigits: 0,
+      });
+    }
+    
+    // For smaller numbers, show more precision
+    return num.toFixed(8).replace(/\.?0+$/, '');
   }
 }
 

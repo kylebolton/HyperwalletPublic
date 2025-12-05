@@ -21,18 +21,24 @@ export class ChainManager {
   private evmSecret: string | null = null;
   private evmIsPrivateKey: boolean = false;
   private nonEvmSecret: string | null = null;
+  private walletId: string | null = null;
+  private derivationIndex: number = 0;
 
   constructor(
     evmSecret?: string,
     evmIsPrivateKey: boolean = false,
     nonEvmSecret?: string,
-    networkConfigs?: NetworkConfig[]
+    networkConfigs?: NetworkConfig[],
+    walletId?: string,
+    derivationIndex: number = 0
   ) {
     // Support for all-in-one wallet: use private key for EVM, mnemonic for non-EVM
     // When importing either, both are automatically created/derived to ensure all chains work
     this.evmSecret = evmSecret || null;
     this.evmIsPrivateKey = evmIsPrivateKey;
     this.nonEvmSecret = nonEvmSecret || null;
+    this.walletId = walletId || null;
+    this.derivationIndex = derivationIndex;
 
     // Helper function to get network config for a chain
     const getNetworkConfig = (chain: SupportedChain): NetworkConfig | undefined => {
@@ -55,7 +61,10 @@ export class ChainManager {
               rpcUrl: hyperEVMConfig.rpcUrl || "https://eth.llamarpc.com",
               chainId: hyperEVMConfig.chainId || 1,
             },
-            this.evmIsPrivateKey
+            this.evmIsPrivateKey,
+            undefined,
+            this.walletId,
+            this.derivationIndex
           )
         );
       }
@@ -73,7 +82,10 @@ export class ChainManager {
               rpcUrl: ethConfig.rpcUrl || "https://eth.llamarpc.com",
               chainId: ethConfig.chainId || 1,
             },
-            this.evmIsPrivateKey
+            this.evmIsPrivateKey,
+            undefined,
+            this.walletId,
+            this.derivationIndex
           )
         );
       }
@@ -90,36 +102,42 @@ export class ChainManager {
         // Initialize EVM chains with derived private key
         const hyperEVMConfig = getNetworkConfig(SupportedChain.HYPEREVM);
         if (hyperEVMConfig) {
-          this.services.set(
-            SupportedChain.HYPEREVM,
-            new EVMChainService(
-              derivedPrivateKey,
-              {
-                name: hyperEVMConfig.name,
-                symbol: hyperEVMConfig.symbol,
-                rpcUrl: hyperEVMConfig.rpcUrl || "https://eth.llamarpc.com",
-                chainId: hyperEVMConfig.chainId || 1,
-              },
-              true // It's a derived private key
-            )
-          );
+        this.services.set(
+          SupportedChain.HYPEREVM,
+          new EVMChainService(
+            derivedPrivateKey,
+            {
+              name: hyperEVMConfig.name,
+              symbol: hyperEVMConfig.symbol,
+              rpcUrl: hyperEVMConfig.rpcUrl || "https://eth.llamarpc.com",
+              chainId: hyperEVMConfig.chainId || 1,
+            },
+            true, // It's a derived private key
+            undefined,
+            this.walletId,
+            this.derivationIndex
+          )
+        );
         }
 
         const ethConfig = getNetworkConfig(SupportedChain.ETH);
         if (ethConfig) {
-          this.services.set(
-            SupportedChain.ETH,
-            new EVMChainService(
-              derivedPrivateKey,
-              {
-                name: ethConfig.name,
-                symbol: ethConfig.symbol,
-                rpcUrl: ethConfig.rpcUrl || "https://eth.llamarpc.com",
-                chainId: ethConfig.chainId || 1,
-              },
-              true // It's a derived private key
-            )
-          );
+        this.services.set(
+          SupportedChain.ETH,
+          new EVMChainService(
+            derivedPrivateKey,
+            {
+              name: ethConfig.name,
+              symbol: ethConfig.symbol,
+              rpcUrl: ethConfig.rpcUrl || "https://eth.llamarpc.com",
+              chainId: ethConfig.chainId || 1,
+            },
+            true, // It's a derived private key
+            undefined,
+            this.walletId,
+            this.derivationIndex
+          )
+        );
         }
       } catch (e) {
         console.error("Failed to derive EVM chains from mnemonic:", e);
@@ -134,7 +152,7 @@ export class ChainManager {
         try {
           this.services.set(
             SupportedChain.BTC,
-            new BTCChainService(this.nonEvmSecret)
+            new BTCChainService(this.nonEvmSecret, 'mainnet', this.walletId, this.derivationIndex)
           );
         } catch (e) {
           console.error("Failed to initialize BTC service:", e);
@@ -147,7 +165,7 @@ export class ChainManager {
         try {
           this.services.set(
             SupportedChain.SOL,
-            new SOLChainService(this.nonEvmSecret)
+            new SOLChainService(this.nonEvmSecret, undefined, this.walletId, this.derivationIndex)
           );
         } catch (e) {
           console.error("Failed to initialize SOL service:", e);
@@ -160,7 +178,7 @@ export class ChainManager {
         try {
           this.services.set(
             SupportedChain.XMR,
-            new MoneroChainService(this.nonEvmSecret)
+            new MoneroChainService(this.nonEvmSecret, this.walletId, this.derivationIndex)
           );
         } catch (e) {
           console.error("Failed to initialize XMR service:", e);
@@ -171,7 +189,7 @@ export class ChainManager {
       const zecConfig = getNetworkConfig(SupportedChain.ZEC);
       if (zecConfig) {
         try {
-          const zecService = new ZCashChainService(this.nonEvmSecret);
+          const zecService = new ZCashChainService(this.nonEvmSecret, 'mainnet', this.walletId, this.derivationIndex);
           this.services.set(SupportedChain.ZEC, zecService);
         } catch (e: any) {
           console.error("ChainManager: ZCash service initialization failed:", e);

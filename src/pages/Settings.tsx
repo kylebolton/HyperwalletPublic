@@ -608,39 +608,6 @@ export default function Settings() {
 
           <div className="space-y-4">
             <div className="p-6 bg-[var(--bg-secondary)] rounded-2xl border border-[var(--border-primary)] transition-colors">
-              <h3 className="font-bold text-lg mb-2">
-                Platform Revenue Address
-              </h3>
-              <div className="flex items-center gap-2 p-3 bg-[var(--bg-tertiary)] rounded-xl border border-[var(--border-primary)] transition-colors">
-                <span className="flex-1 font-mono text-sm text-[var(--text-primary)] break-all">
-                  0x0e7FCDC85f296004Bc235cc86cfA69da2c39324a
-                </span>
-                <button
-                  onClick={() =>
-                    copyToClipboard(
-                      "0x0e7FCDC85f296004Bc235cc86cfA69da2c39324a"
-                    )
-                  }
-                  className="p-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-                  title="Copy address"
-                >
-                  <Copy size={18} />
-                </button>
-              </div>
-              <p className="mt-2 text-sm text-[var(--text-secondary)]">
-                All platform fees and revenue share from swaps are sent to this
-                address.
-              </p>
-            </div>
-
-            <div className="p-4 bg-blue-50 dark:bg-blue-950 rounded-xl border border-blue-100 dark:border-blue-900 transition-colors">
-              <p className="text-sm text-blue-700 dark:text-blue-400">
-                <strong>Fee Structure:</strong> We charge a 1% platform fee on
-                all swaps.
-              </p>
-            </div>
-
-            <div className="p-6 bg-[var(--bg-secondary)] rounded-2xl border border-[var(--border-primary)] transition-colors">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h3 className="font-bold text-lg mb-1">Network Settings</h3>

@@ -58,7 +58,7 @@ export default function Modal({
                   <X size={20} className="text-[var(--text-secondary)]" />
                 </button>
               </div>
-              <div className="p-6 overflow-y-auto flex-shrink">{children}</div>
+              <div className="px-6 pt-6 pb-4 overflow-y-auto flex-shrink">{children}</div>
             </div>
           </motion.div>
         </>

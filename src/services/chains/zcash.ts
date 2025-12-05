@@ -4,6 +4,7 @@ import { BIP32Factory } from "bip32";
 import * as ecc from "tiny-secp256k1";
 import { type IChainService } from "./types";
 import { sha256 } from "@noble/hashes/sha256";
+import { AddressCacheService } from '../addressCache';
 
 const bip32 = BIP32Factory(ecc);
 
@@ -52,24 +53,38 @@ export class ZCashChainService implements IChainService {
   chainName = "ZCash";
   symbol = "ZEC";
   private network: bitcoin.Network;
-  private transparentAddress: string;
+  private transparentAddress: string | null = null;
   private keyPair: any;
   private apiUrls: string[];
+  private walletId: string | null = null;
+  private derivationIndex: number = 0;
+  private mnemonic: string;
+  private static balanceCache: Map<
+    string,
+    { balance: string; timestamp: number; backoffUntil?: number }
+  > = new Map();
 
-  constructor(mnemonic: string, network: "mainnet" | "testnet" = "mainnet") {
+  constructor(
+    mnemonic: string,
+    network: "mainnet" | "testnet" = "mainnet",
+    walletId?: string,
+    derivationIndex: number = 0
+  ) {
+    this.mnemonic = mnemonic;
+    this.walletId = walletId || null;
+    this.derivationIndex = derivationIndex;
     try {
       // Use proper ZCash network configuration with correct version bytes
       this.network = network === "mainnet" ? zcashMainnet : zcashTestnet;
 
       // ZCash public API endpoints
-      // Using Tatum's free RPC gateway (FreeRPC.com) - 5 requests/minute free tier
-      // REST API: https://zcash-mainnet.gateway.tatum.io/rest
-      // Alternative: Blockchair API (requires free API key from blockchair.com/api)
+      // Primary: zcha explorer (no key), Fallback: Blockchair (optional key), Legacy: Tatum free gateway
       this.apiUrls =
         network === "mainnet"
           ? [
-              "https://zcash-mainnet.gateway.tatum.io/rest", // Tatum FreeRPC REST API (primary - free)
-              "https://api.blockchair.com/zcash", // Blockchair (fallback, requires API key)
+              "https://api.zcha.in/v2/mainnet/accounts",
+              "https://api.blockchair.com/zcash",
+              "https://zcash-mainnet.gateway.tatum.io/rest",
             ]
           : ["https://zcash-testnet.gateway.tatum.io/rest"];
 
@@ -83,9 +98,9 @@ export class ZCashChainService implements IChainService {
       // The derivation path handles the coin type difference
       const root = bip32.fromSeed(seed, bitcoin.networks.bitcoin);
 
-      // ZCash BIP44 path: m/44'/133'/0'/0/0 (coin type 133 for ZCash)
-      const path =
-        network === "mainnet" ? "m/44'/133'/0'/0/0" : "m/44'/1'/0'/0/0";
+      // ZCash BIP44 path: m/44'/133'/0'/0/{derivationIndex} (coin type 133 for ZCash)
+      const basePath = network === "mainnet" ? "m/44'/133'/0'/0" : "m/44'/1'/0'/0";
+      const path = `${basePath}/${derivationIndex}`;
 
       try {
         const child = root.derivePath(path);
@@ -167,6 +182,16 @@ export class ZCashChainService implements IChainService {
         }
 
         this.transparentAddress = address;
+        
+        // Cache the address if walletId is provided
+        if (this.walletId && this.transparentAddress) {
+          AddressCacheService.setCachedAddress(
+            this.walletId,
+            this.symbol,
+            this.transparentAddress,
+            this.derivationIndex
+          );
+        }
 
         // Verify address starts with correct prefix
         if (network === "mainnet") {
@@ -224,6 +249,34 @@ export class ZCashChainService implements IChainService {
   }
 
   async getAddress(): Promise<string> {
+    // Check cache first if walletId is available
+    if (this.walletId) {
+      const cached = AddressCacheService.getCachedAddress(
+        this.walletId,
+        this.symbol,
+        this.derivationIndex
+      );
+      if (cached) {
+        this.transparentAddress = cached;
+        return cached;
+      }
+    }
+    
+    // Use generated address
+    if (!this.transparentAddress) {
+      throw new Error("ZCash address not initialized");
+    }
+    
+    // Cache the address if walletId is provided
+    if (this.walletId && this.transparentAddress) {
+      AddressCacheService.setCachedAddress(
+        this.walletId,
+        this.symbol,
+        this.transparentAddress,
+        this.derivationIndex
+      );
+    }
+    
     // Return transparent address for now
     // Shielded addresses (z-addresses) require more complex implementation
     // Validate address before returning (non-blocking - warn but still return)
@@ -296,6 +349,24 @@ export class ZCashChainService implements IChainService {
   }
 
   async getBalance(): Promise<string> {
+    const cached = ZCashChainService.balanceCache.get(this.transparentAddress);
+    const now = Date.now();
+    if (cached && now - cached.timestamp < 120000) {
+      // Return cached within 2 minutes
+      return cached.balance;
+    }
+    if (cached?.backoffUntil && now < cached.backoffUntil) {
+      return cached.balance;
+    }
+
+    const saveCache = (balance: string, backoffMs = 0) => {
+      ZCashChainService.balanceCache.set(this.transparentAddress, {
+        balance,
+        timestamp: Date.now(),
+        backoffUntil: backoffMs ? Date.now() + backoffMs : undefined,
+      });
+    };
+
     for (const apiUrl of this.apiUrls) {
       try {
         const balance = await retry(
@@ -432,8 +503,15 @@ export class ZCashChainService implements IChainService {
               // Format: /dashboards/address/{address}
               if (apiUrl.includes("blockchair.com")) {
                 try {
+                  const apiKey =
+                    (import.meta as any)?.env?.VITE_BLOCKCHAIR_API_KEY ||
+                    (typeof process !== "undefined"
+                      ? (process as any).env?.VITE_BLOCKCHAIR_API_KEY
+                      : undefined);
+                  const query = apiKey ? `?key=${apiKey}` : "";
+
                   const response = await fetch(
-                    `${apiUrl}/dashboards/address/${this.transparentAddress}`,
+                    `${apiUrl}/dashboards/address/${this.transparentAddress}${query}`,
                     {
                       signal: controller.signal,
                       headers: {
@@ -493,6 +571,40 @@ export class ZCashChainService implements IChainService {
                 // Continue - no balance endpoint available
               }
 
+              // Try format 5: zcha.in format (/v2/mainnet/accounts/{address})
+              if (apiUrl.includes("zcha.in")) {
+                try {
+                  const response = await fetch(
+                    `${apiUrl}/${this.transparentAddress}`,
+                    {
+                      signal: controller.signal,
+                      headers: {
+                        Accept: "application/json",
+                      },
+                    }
+                  );
+
+                  if (response.ok) {
+                    const data = await response.json();
+                    clearTimeout(timeoutId);
+                    if (data.balance !== undefined) {
+                      return parseFloat(data.balance).toFixed(8);
+                    }
+                    if (data.balanceZEC !== undefined) {
+                      return parseFloat(data.balanceZEC).toFixed(8);
+                    }
+                    if (data.total_received !== undefined && data.total_sent !== undefined) {
+                      return (
+                        (parseFloat(data.total_received) -
+                          parseFloat(data.total_sent)) || 0
+                      ).toFixed(8);
+                    }
+                  }
+                } catch (e) {
+                  // Continue
+                }
+              }
+
               clearTimeout(timeoutId);
               throw new Error("Unable to parse balance from API response");
             } catch (error: any) {
@@ -507,14 +619,19 @@ export class ZCashChainService implements IChainService {
           1000
         );
 
+        saveCache(balance);
         return balance;
       } catch (error) {
         // Silently fail and try next API - errors are expected when APIs are unavailable
+        if ((error as any)?.message?.includes("Rate limit")) {
+          saveCache("0.0", 5 * 60 * 1000); // back off 5 minutes on rate limit
+        }
         continue; // Try next API
       }
     }
 
     // All APIs failed - return 0 without logging (expected in production)
+    saveCache("0.0", 2 * 60 * 1000);
     return "0.0";
   }
 

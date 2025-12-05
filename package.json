@@ -1,7 +1,7 @@
 {
   "name": "hyperwallet",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "main": "dist-electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -11,12 +11,14 @@
     "electron": "wait-on tcp:5173 && electron .",
     "electron:dev": "wait-on tcp:5173 && cross-env NODE_ENV=development electron .",
     "build": "tsc -p tsconfig.electron.json && mv dist-electron/main.js dist-electron/main.cjs && mv dist-electron/preload.js dist-electron/preload.cjs && vite build && electron-builder",
+    "build:publish": "tsc -p tsconfig.electron.json && mv dist-electron/main.js dist-electron/main.cjs && mv dist-electron/preload.js dist-electron/preload.cjs && vite build && electron-builder --publish always",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "icons": "node build/icons/create-icon.mjs"
   },
   "build": {
     "appId": "com.hyperwallet.app",
@@ -27,13 +29,27 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
-      "package.json"
+      "package.json",
+      "!node_modules/**/*",
+      "node_modules/monero-ts/**/*"
     ],
+    "asar": true,
+    "publish": {
+      "provider": "github",
+      "owner": "kylebolton",
+      "repo": "HyperWallet",
+      "releaseType": "release"
+    },
     "mac": {
-      "category": "public.app-category.finance"
+      "category": "public.app-category.finance",
+      "icon": "build/icons/icon.icns"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build/icons/icon.png"
+    },
+    "linux": {
+      "icon": "build/icons/icon.png"
     }
   },
   "dependencies": {
@@ -43,24 +59,32 @@
     "bip32": "^5.0.0",
     "bip39": "^3.1.0",
     "bitcoinjs-lib": "^7.0.0",
+    "browserify-zlib": "^0.2.0",
     "buffer": "^6.0.3",
     "clsx": "^2.1.1",
+    "crypto-browserify": "^3.12.1",
     "ed25519-hd-key": "^1.3.0",
     "electron-squirrel-startup": "^1.0.1",
+    "electron-updater": "^6.6.2",
     "ethers": "^6.15.0",
     "events": "^3.3.0",
     "framer-motion": "^12.23.24",
+    "https-browserify": "^1.0.0",
     "lucide-react": "^0.554.0",
-    "monero-ts": "^0.11.6",
+    "memfs": "^4.51.1",
+    "monero-ts": "^0.11.7",
+    "path-browserify": "^1.0.1",
     "postcss": "^8.5.6",
     "qrcode.react": "^4.2.0",
+    "querystring-es3": "^0.2.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.9.6",
-    "recharts": "^3.4.1",
+    "stream-http": "^3.2.0",
     "tailwind-merge": "^3.4.0",
     "tailwindcss": "^4.1.17",
     "tiny-secp256k1": "^2.2.4",
+    "url": "^0.11.4",
     "vite-plugin-top-level-await": "^1.6.0",
     "vite-plugin-wasm": "^3.5.0"
   },
@@ -82,6 +106,7 @@
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
     "jsdom": "^22.1.0",
+    "sharp": "^0.34.5",
     "stream-browserify": "^3.0.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",

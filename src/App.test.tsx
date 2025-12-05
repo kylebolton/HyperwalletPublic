@@ -38,9 +38,6 @@ vi.mock("./pages/History", () => ({ default: () => <div>History Page</div> }));
 vi.mock("./pages/Settings", () => ({
   default: () => <div>Settings Page</div>,
 }));
-vi.mock("./pages/Analytics", () => ({
-  default: () => <div>Analytics Page</div>,
-}));
 vi.mock("./pages/Import", () => ({ default: () => <div>Import Page</div> }));
 
 describe("App Integration", () => {

@@ -1,0 +1,42 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4"/>
+      <feOffset dx="0" dy="4" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.3"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Background circle -->
+  <circle cx="512" cy="512" r="480" fill="url(#gradient)"/>
+  
+  <!-- Wallet body -->
+  <rect x="256" y="320" width="512" height="384" rx="32" ry="32" fill="#ffffff" opacity="0.95"/>
+  
+  <!-- Wallet flap/cover -->
+  <path d="M 256 320 Q 512 240 768 320 L 768 400 Q 512 320 256 400 Z" fill="#ffffff" opacity="0.9"/>
+  
+  <!-- Wallet opening -->
+  <rect x="256" y="400" width="512" height="8" fill="url(#gradient)" opacity="0.3"/>
+  
+  <!-- Card slots -->
+  <rect x="320" y="480" width="384" height="48" rx="8" ry="8" fill="#e5e7eb" opacity="0.6"/>
+  <rect x="320" y="560" width="320" height="48" rx="8" ry="8" fill="#e5e7eb" opacity="0.4"/>
+  
+  <!-- Currency symbol (H for HyperWallet) -->
+  <text x="512" y="680" font-family="Arial, sans-serif" font-size="200" font-weight="bold" fill="url(#gradient)" text-anchor="middle" opacity="0.8">H</text>
+  
+  <!-- Shine effect -->
+  <ellipse cx="400" cy="360" rx="120" ry="80" fill="#ffffff" opacity="0.3"/>
+</svg>
+

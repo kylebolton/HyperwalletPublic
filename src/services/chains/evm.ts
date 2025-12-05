@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import { type IChainService, type ChainConfig } from './types';
+import { AddressCacheService } from '../addressCache';
 
 // Retry helper
 async function retry<T>(fn: () => Promise<T>, retries = 2, delay = 1000): Promise<T> {
@@ -18,10 +19,21 @@ export class EVMChainService implements IChainService {
     private provider: ethers.JsonRpcProvider;
     private wallet: ethers.Wallet;
     private fallbackProviders: ethers.JsonRpcProvider[];
+    private walletId: string | null = null;
+    private derivationIndex: number = 0;
 
-    constructor(secret: string, config: ChainConfig, isPrivateKey: boolean = false, derivationPath: string = "m/44'/60'/0'/0/0") {
+    constructor(
+        secret: string,
+        config: ChainConfig,
+        isPrivateKey: boolean = false,
+        derivationPath?: string,
+        walletId?: string,
+        derivationIndex: number = 0
+    ) {
         this.chainName = config.name;
         this.symbol = config.symbol;
+        this.walletId = walletId || null;
+        this.derivationIndex = derivationIndex;
         
         // Primary provider
         this.provider = new ethers.JsonRpcProvider(config.rpcUrl, undefined, {
@@ -36,11 +48,24 @@ export class EVMChainService implements IChainService {
             })
         );
         
+        // Build derivation path with index if not provided
+        const finalDerivationPath = derivationPath || `m/44'/60'/0'/0/${derivationIndex}`;
+        
         if (isPrivateKey) {
             this.wallet = new ethers.Wallet(secret, this.provider);
         } else {
-            const hdNode = ethers.HDNodeWallet.fromPhrase(secret, undefined, derivationPath);
+            const hdNode = ethers.HDNodeWallet.fromPhrase(secret, undefined, finalDerivationPath);
             this.wallet = new ethers.Wallet(hdNode.privateKey, this.provider);
+        }
+        
+        // Cache the address if walletId is provided
+        if (this.walletId && this.wallet.address) {
+            AddressCacheService.setCachedAddress(
+                this.walletId,
+                this.symbol,
+                this.wallet.address,
+                this.derivationIndex
+            );
         }
     }
 
@@ -77,7 +102,30 @@ export class EVMChainService implements IChainService {
     }
 
     async getAddress(): Promise<string> {
+        // Check cache first if walletId is available
+        if (this.walletId) {
+            const cached = AddressCacheService.getCachedAddress(
+                this.walletId,
+                this.symbol,
+                this.derivationIndex
+            );
+            if (cached) {
+                return cached;
+            }
+        }
+        
         const address = this.wallet.address;
+        
+        // Cache the address if walletId is provided
+        if (this.walletId && address) {
+            AddressCacheService.setCachedAddress(
+                this.walletId,
+                this.symbol,
+                address,
+                this.derivationIndex
+            );
+        }
+        
         // Validate address format and checksum (non-blocking - warn but still return)
         if (!this.validateAddress(address)) {
             console.warn(`EVM address validation failed for: ${address}, but returning anyway`);

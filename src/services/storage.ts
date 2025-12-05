@@ -4,7 +4,9 @@ export const STORAGE_KEYS = {
   NETWORKS: 'hyperwallet_networks',
   SETTINGS: 'hyperwallet_settings',
   WALLETS: 'hyperwallet_wallets',
-  ACTIVE_WALLET_ID: 'hyperwallet_active_wallet_id'
+  ACTIVE_WALLET_ID: 'hyperwallet_active_wallet_id',
+  ADDRESS_CACHE: 'hyperwallet_address_cache',
+  BALANCE_CACHE: 'hyperwallet_balance_cache'
 };
 
 export interface Wallet {

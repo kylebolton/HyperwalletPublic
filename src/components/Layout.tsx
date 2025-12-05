@@ -6,7 +6,6 @@ import {
   Settings,
   ShieldCheck,
   History,
-  BarChart2,
   Download,
   Wallet as WalletIcon,
   ChevronDown,
@@ -20,6 +19,7 @@ import { ChainManager } from "../services/chains/manager";
 import { NetworkService } from "../services/networks";
 import type { Wallet } from "../services/storage";
 import { enableConsoleLogs, suppressConsoleLogs } from "../utils/consoleSuppress";
+import { ConnectionStatusService, type AggregateStatus } from "../services/connectionStatus";
 
 export default function Layout() {
   const location = useLocation();
@@ -27,22 +27,35 @@ export default function Layout() {
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [activeWallet, setActiveWallet] = useState<Wallet | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(true);
-  const [syncStatus, setSyncStatus] = useState<string>("Connecting to chains...");
+  const [connectionStatus, setConnectionStatus] = useState<AggregateStatus>({
+    overall: 'connecting',
+    chains: [],
+    message: 'Initializing...',
+  });
   const [isSwitchingWallet, setIsSwitchingWallet] = useState(false);
 
-  // Console log suppression - enable/disable based on sync status
+  // Subscribe to connection status changes
   useEffect(() => {
-    if (isSyncing) {
+    const unsubscribe = ConnectionStatusService.subscribe((status) => {
+      setConnectionStatus(status);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  // Console log suppression - enable/disable based on connection status
+  useEffect(() => {
+    if (connectionStatus.overall === 'connecting') {
       suppressConsoleLogs();
     } else {
       enableConsoleLogs();
     }
-  }, [isSyncing]);
+  }, [connectionStatus.overall]);
 
   const navItems = [
     { icon: LayoutDashboard, label: "Portfolio", path: "/" },
-    { icon: BarChart2, label: "Analytics", path: "/analytics" },
     { icon: History, label: "History", path: "/history" },
     { icon: Repeat, label: "Swap", path: "/swap" },
     { icon: Download, label: "Import", path: "/import" },
@@ -64,104 +77,9 @@ export default function Layout() {
     return () => clearInterval(interval);
   }, []);
 
-  // Check and initialize wallet sync status
+  // Clear connection status when switching wallets
   useEffect(() => {
-    let isMounted = true;
-    let syncTimeout: NodeJS.Timeout;
-
-    const checkWalletSync = async () => {
-      try {
-        const active = WalletService.getActiveWallet();
-        
-        if (!active) {
-          if (isMounted) {
-            setIsSyncing(false);
-            setSyncStatus("No wallet");
-          }
-          return;
-        }
-
-        const mnemonic = active.mnemonic;
-        const privKey = active.privateKey;
-
-        if (!mnemonic && !privKey) {
-          if (isMounted) {
-            setIsSyncing(false);
-            setSyncStatus("No wallet credentials");
-          }
-          return;
-        }
-
-        // Set syncing to true while we check
-        if (isMounted) {
-          setIsSyncing(true);
-          setSyncStatus("Connecting to chains...");
-        }
-
-        // Get enabled network configs
-        const enabledNetworks = NetworkService.getEnabledNetworks();
-
-        // Create manager with both secrets if available
-        const manager = new ChainManager(
-          privKey || undefined,
-          !!privKey,
-          mnemonic || undefined,
-          enabledNetworks
-        );
-        const services = manager.getAllServices();
-
-        // Initialize services that need it
-        const initPromises = services.map(async (service, index) => {
-          try {
-            if ('init' in service && typeof service.init === 'function') {
-              if (isMounted) setSyncStatus(`Initializing ${service.symbol}...`);
-              await service.init();
-            }
-            // Try to get address to verify it's working
-            if (isMounted) setSyncStatus(`Verifying ${service.symbol}...`);
-            await service.getAddress();
-            return true;
-          } catch (e) {
-            // Suppress warning during sync
-            return false;
-          }
-        });
-
-        // Wait for all initializations with timeout
-        await Promise.race([
-          Promise.all(initPromises),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("Sync timeout")), 15000)
-          ),
-        ]);
-
-        // All wallets synced
-        if (isMounted) {
-          setSyncStatus("Connected");
-          setIsSyncing(false);
-        }
-      } catch (e) {
-        // Suppress warning during sync - it will be shown after sync completes
-        // On error, still mark as synced after a delay (to show we tried)
-        syncTimeout = setTimeout(() => {
-          if (isMounted) {
-            setSyncStatus("Connection failed");
-            setIsSyncing(false);
-          }
-        }, 2000);
-      }
-    };
-
-    checkWalletSync();
-
-    // Re-check periodically
-    const syncInterval = setInterval(checkWalletSync, 5000);
-
-    return () => {
-      isMounted = false;
-      clearInterval(syncInterval);
-      if (syncTimeout) clearTimeout(syncTimeout);
-    };
+    ConnectionStatusService.clearAll();
   }, [activeWallet?.id]);
 
   const handleSwitchWallet = async (walletId: string) => {
@@ -309,30 +227,32 @@ export default function Layout() {
 
         <div className="p-4 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-primary)] transition-colors">
           <div className="flex items-center gap-3 mb-2">
-            {isSyncing ? (
+            {connectionStatus.overall === 'connecting' ? (
               <>
                 <Loader2 size={16} className="text-yellow-500 animate-spin" />
                 <div className="flex flex-col flex-1 min-w-0">
                   <span className="text-xs font-bold text-yellow-500">
                     STATUS: CONNECTING
                   </span>
-                  {syncStatus && syncStatus !== "Connecting to chains..." && (
-                    <span className="text-xs text-yellow-400 mt-0.5 truncate" title={syncStatus}>
-                      {syncStatus}
+                  {connectionStatus.message && (
+                    <span className="text-xs text-yellow-400 mt-0.5 truncate" title={connectionStatus.message}>
+                      {connectionStatus.message}
                     </span>
                   )}
                 </div>
               </>
-            ) : syncStatus === "Connection failed" ? (
+            ) : connectionStatus.overall === 'error' ? (
               <>
                 <ShieldCheck size={16} className="text-red-500" />
                 <div className="flex flex-col flex-1 min-w-0">
                   <span className="text-xs font-bold text-red-500">
                     STATUS: ERROR
                   </span>
-                  <span className="text-xs text-red-400 mt-0.5 truncate" title={syncStatus}>
-                    {syncStatus}
-                  </span>
+                  {connectionStatus.message && (
+                    <span className="text-xs text-red-400 mt-0.5 truncate" title={connectionStatus.message}>
+                      {connectionStatus.message}
+                    </span>
+                  )}
                 </div>
               </>
             ) : (
@@ -342,9 +262,9 @@ export default function Layout() {
                   <span className="text-xs font-bold text-green-500">
                     STATUS: SECURE
                   </span>
-                  {syncStatus && syncStatus !== "Connected" && (
-                    <span className="text-xs text-green-400 mt-0.5 truncate" title={syncStatus}>
-                      {syncStatus}
+                  {connectionStatus.message && connectionStatus.message !== `Connected to ${connectionStatus.chains.length} chain(s)` && (
+                    <span className="text-xs text-green-400 mt-0.5 truncate" title={connectionStatus.message}>
+                      {connectionStatus.message}
                     </span>
                   )}
                 </div>
@@ -352,14 +272,14 @@ export default function Layout() {
             )}
           </div>
           <div className="w-full bg-[var(--bg-tertiary)] h-1.5 rounded-full overflow-hidden">
-            {isSyncing ? (
+            {connectionStatus.overall === 'connecting' ? (
               <motion.div
                 initial={{ width: 0 }}
                 animate={{ width: "100%" }}
                 transition={{ duration: 0.3 }}
                 className="bg-yellow-500 h-full"
               />
-            ) : syncStatus === "Connection failed" ? (
+            ) : connectionStatus.overall === 'error' ? (
               <div className="bg-red-500 h-full w-full" />
             ) : (
               <motion.div

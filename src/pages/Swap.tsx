@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { SwapService, type SwapQuote } from "../services/swap";
 import {
   ZCashShieldService,
@@ -12,6 +12,11 @@ import { usePreviewMode } from "../contexts/PreviewModeContext";
 import { PreviewDataService } from "../services/previewData";
 import { motion } from "framer-motion";
 import { ArrowRightLeft, Shield, Wallet } from "lucide-react";
+import CurrencySelect, { type CurrencyOption } from "../components/CurrencySelect";
+
+// Base chain currencies (non-HyperEVM)
+const baseChains = ["BTC", "ETH", "SOL"];
+const privacyCoins = ["XMR", "ZEC"];
 
 export default function Swap() {
   const { isPreviewMode } = usePreviewMode();
@@ -124,13 +129,88 @@ export default function Swap() {
           setQuote(mockQuote);
           setShieldQuote(null);
         } else {
-          const q = await SwapService.getQuote(from, to, amount);
+          // Get token addresses from loaded tokens for HyperEVM swaps
+          let fromTokenAddress: string | undefined;
+          let toTokenAddress: string | undefined;
+          let walletAddr: string | undefined;
+
+          const isHyperEVMSwap = isHyperEVMToken(from) && isHyperEVMToken(to);
+          if (isHyperEVMSwap) {
+            // Find token addresses from loaded tokens
+            const fromToken = hyperEVMTokens.find(
+              (t) => t.symbol.toUpperCase() === from.toUpperCase()
+            );
+            const toToken = hyperEVMTokens.find(
+              (t) => t.symbol.toUpperCase() === to.toUpperCase()
+            );
+
+            if (fromToken && fromToken.address !== "0x0000000000000000000000000000000000000000") {
+              fromTokenAddress = fromToken.address;
+            }
+            if (toToken && toToken.address !== "0x0000000000000000000000000000000000000000") {
+              toTokenAddress = toToken.address;
+            }
+
+            // Get wallet address for token discovery if addresses not found
+            // Try walletAddress first (destination address), then try to get HyperEVM address directly
+            if (!fromTokenAddress || !toTokenAddress) {
+              if (walletAddress && getChainKey(to) === SupportedChain.HYPEREVM) {
+                walletAddr = walletAddress;
+              } else if (!isPreviewMode) {
+                // Try to get HyperEVM address directly
+                try {
+                  const activeWallet = WalletService.getActiveWallet();
+                  if (activeWallet) {
+                    const mnemonic = activeWallet.mnemonic;
+                    const privKey = activeWallet.privateKey;
+                    if (mnemonic || privKey) {
+                      const enabledNetworks = NetworkService.getEnabledNetworks();
+                      const manager = new ChainManager(
+                        privKey || undefined,
+                        !!privKey,
+                        mnemonic || undefined,
+                        enabledNetworks
+                      );
+                      const hypeService = manager.getService(SupportedChain.HYPEREVM);
+                      const hypeAddress = await hypeService.getAddress();
+                      walletAddr = hypeAddress;
+                    }
+                  }
+                } catch (e) {
+                  console.warn("Failed to get HyperEVM address for token discovery:", e);
+                }
+              }
+            }
+          }
+
+          console.log(`Getting quote: ${from} → ${to}`, {
+            fromTokenAddress,
+            toTokenAddress,
+            walletAddress: walletAddr,
+          });
+
+          const q = await SwapService.getQuote(
+            from,
+            to,
+            amount,
+            walletAddr,
+            fromTokenAddress,
+            toTokenAddress
+          );
           setQuote(q);
           setShieldQuote(null);
         }
       }
     } catch (e: any) {
-      console.error("Quote failed:", e);
+      console.error("Quote failed:", {
+        error: e.message,
+        stack: e.stack,
+        from,
+        to,
+        amount,
+        isShieldSwap,
+        isHyperEVMSwap: isHyperEVMToken(from) && isHyperEVMToken(to),
+      });
       const errorMsg = e.message || "Failed to get quote";
       if (isShieldSwap && errorMsg.includes("mnemonic required")) {
         setSwapStatus(`Error: Wallet mnemonic required for ZCash shield swaps. Please ensure your wallet is properly initialized.`);
@@ -212,15 +292,17 @@ export default function Swap() {
       const res = await SwapService.createSwap(quote, destAddress);
       setSwapStatus(`Swap initiated! Deposit to: ${res.depositAddress}${res.txHash ? ` | TX: ${res.txHash}` : ""}`);
     } catch (e: any) {
+      console.error("Swap execution failed:", {
+        error: e.message,
+        stack: e.stack,
+        quote,
+        destinationAddress: useCustomDestination ? destinationAddress : walletAddress,
+      });
       setSwapStatus(`Swap error: ${e.message || "Failed to create swap"}`);
     } finally {
       setLoading(false);
     }
   };
-
-  // Base chain currencies (non-HyperEVM)
-  const baseChains = ["BTC", "ETH", "SOL"];
-  const privacyCoins = ["XMR", "ZEC"];
 
   // Load HyperEVM tokens
   useEffect(() => {
@@ -273,6 +355,40 @@ export default function Swap() {
 
     loadTokens();
   }, [isPreviewMode]);
+
+  // Build currency options with grouping for CurrencySelect component
+  const currencyOptions = useMemo<CurrencyOption[]>(() => {
+    const options: CurrencyOption[] = [];
+    
+    // HyperEVM Tokens
+    hyperEVMTokens.forEach(token => {
+      options.push({
+        value: token.symbol,
+        label: token.symbol,
+        group: "HyperEVM Tokens",
+      });
+    });
+    
+    // Base Chains
+    baseChains.forEach(chain => {
+      options.push({
+        value: chain,
+        label: chain,
+        group: "Base Chains",
+      });
+    });
+    
+    // Privacy Coins
+    privacyCoins.forEach(coin => {
+      options.push({
+        value: coin,
+        label: coin,
+        group: "Privacy Coins",
+      });
+    });
+    
+    return options;
+  }, [hyperEVMTokens]);
 
   // All available currencies (HyperEVM tokens + base chains + privacy coins)
   const allCurrencies = [
@@ -490,7 +606,7 @@ export default function Swap() {
             className={`px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 ${
               swapProvider === "hyperswap"
                 ? "bg-hyper-green text-black"
-                : "bg-blue-500 text-white"
+                : "bg-[var(--bg-tertiary)] text-[var(--text-primary)] border border-[var(--border-primary)]"
             }`}
           >
             {swapProvider === "hyperswap" ? (
@@ -536,47 +652,18 @@ export default function Swap() {
                     placeholder="0.00"
                   />
               </div>
-              <select
+              <CurrencySelect
                 value={from}
-                onChange={e => {
-                  setFrom(e.target.value);
+                onChange={(value) => {
+                  setFrom(value);
                   setQuote(null);
                   setShieldQuote(null);
                   setShieldProofEnabled(false);
                   setShieldMode("transparent");
                 }}
-                className="bg-[var(--bg-tertiary)] rounded-2xl px-6 py-4 font-bold text-[var(--text-primary)] border border-[var(--border-primary)] transition-colors cursor-pointer hover:bg-[var(--hover-bg)] min-w-[140px]"
-              >
-                {loadingTokens && hyperEVMTokens.length === 0 ? (
-                  <option>Loading...</option>
-                ) : (
-                  <>
-                    {hyperEVMTokens.length > 0 && (
-                      <optgroup label="HyperEVM Tokens">
-                        {hyperEVMTokens.map(token => (
-                          <option key={token.symbol} value={token.symbol}>
-                            {token.symbol}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                    <optgroup label="Base Chains">
-                      {baseChains.map(c => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Privacy Coins">
-                      {privacyCoins.map(c => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </optgroup>
-                  </>
-                )}
-              </select>
+                options={currencyOptions}
+                loading={loadingTokens && hyperEVMTokens.length === 0}
+              />
             </div>
           </div>
 
@@ -617,17 +704,17 @@ export default function Swap() {
                   ) : shieldQuote ? (
                     <span className="flex items-center gap-2">
                       {shieldQuote.amount}
-                      <Shield size={20} className="text-blue-500" />
+                      <Shield size={20} className="text-hyper-green" />
                     </span>
                   ) : (
                     "0.00"
                   )}
                 </div>
               </div>
-              <select
+              <CurrencySelect
                 value={to}
-                onChange={e => {
-                  setTo(e.target.value);
+                onChange={(value) => {
+                  setTo(value);
                   setQuote(null);
                   setShieldQuote(null);
                   setUseCustomDestination(false);
@@ -636,38 +723,9 @@ export default function Swap() {
                   setWalletInitStatus(null);
                   setShieldProofEnabled(false);
                 }}
-                className="bg-[var(--bg-tertiary)] rounded-2xl px-6 py-4 font-bold text-[var(--text-primary)] border border-[var(--border-primary)] transition-colors cursor-pointer hover:bg-[var(--hover-bg)] min-w-[140px]"
-              >
-                {loadingTokens && hyperEVMTokens.length === 0 ? (
-                  <option>Loading...</option>
-                ) : (
-                  <>
-                    {hyperEVMTokens.length > 0 && (
-                      <optgroup label="HyperEVM Tokens">
-                        {hyperEVMTokens.map(token => (
-                          <option key={token.symbol} value={token.symbol}>
-                            {token.symbol}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                    <optgroup label="Base Chains">
-                      {baseChains.map(c => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Privacy Coins">
-                      {privacyCoins.map(c => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </optgroup>
-                  </>
-                )}
-              </select>
+                options={currencyOptions}
+                loading={loadingTokens && hyperEVMTokens.length === 0}
+              />
             </div>
           </div>
 
@@ -862,7 +920,7 @@ export default function Swap() {
                   className={`px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 ${
                     quote.provider === "hyperswap"
                       ? "bg-hyper-green text-black"
-                      : "bg-blue-500 text-white"
+                      : "bg-[var(--bg-tertiary)] text-[var(--text-primary)] border border-[var(--border-primary)]"
                   }`}
                 >
                   {quote.provider === "hyperswap" ? (
@@ -953,14 +1011,14 @@ export default function Swap() {
                 animate={{ opacity: 1, y: 0 }}
                 className="space-y-3"
               >
-                <div className="p-6 bg-blue-50 dark:bg-blue-950 rounded-2xl border border-blue-200 dark:border-blue-800 transition-colors">
+                <div className="p-6 bg-[var(--bg-tertiary)] rounded-2xl border border-[var(--border-primary)] transition-colors">
                   <div className="flex items-center justify-between mb-4">
-                    <span className="text-sm font-bold text-blue-900 dark:text-blue-400 uppercase tracking-wide">
+                    <span className="text-sm font-bold text-[var(--text-primary)] uppercase tracking-wide">
                       Shield Swap Direction
                     </span>
                     <Shield
                       size={20}
-                      className="text-blue-600 dark:text-blue-400"
+                      className="text-hyper-green"
                     />
                   </div>
                   <div className="flex gap-3">
@@ -972,8 +1030,8 @@ export default function Swap() {
                       }}
                       className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold transition-all ${
                         shieldMode === "transparent"
-                          ? "bg-blue-600 text-white shadow-lg ring-2 ring-blue-400"
-                          : "bg-[var(--bg-primary)] text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900"
+                          ? "bg-hyper-green text-black shadow-lg ring-2 ring-hyper-green/50"
+                          : "bg-[var(--bg-primary)] text-[var(--text-primary)] border border-[var(--border-primary)] hover:bg-[var(--hover-bg)]"
                       }`}
                     >
                       T → Z (Shield)
@@ -986,14 +1044,14 @@ export default function Swap() {
                       }}
                       className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold transition-all ${
                         shieldMode === "shielded"
-                          ? "bg-blue-600 text-white shadow-lg ring-2 ring-blue-400"
-                          : "bg-[var(--bg-primary)] text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900"
+                          ? "bg-hyper-green text-black shadow-lg ring-2 ring-hyper-green/50"
+                          : "bg-[var(--bg-primary)] text-[var(--text-primary)] border border-[var(--border-primary)] hover:bg-[var(--hover-bg)]"
                       }`}
                     >
                       Z → T (Unshield)
                     </button>
                   </div>
-                  <p className="text-xs text-blue-700 dark:text-blue-400 mt-3 leading-relaxed">
+                  <p className="text-xs text-[var(--text-secondary)] mt-3 leading-relaxed">
                     {shieldMode === "transparent"
                       ? "Convert transparent (t-address) to shielded (z-address) for enhanced privacy"
                       : "Convert shielded (z-address) to transparent (t-address) for compatibility"}
@@ -1008,9 +1066,9 @@ export default function Swap() {
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="p-4 bg-blue-50 dark:bg-blue-950 rounded-2xl border border-blue-200 dark:border-blue-800 transition-colors"
+                className="p-4 bg-[var(--bg-tertiary)] rounded-2xl border border-[var(--border-primary)] transition-colors"
               >
-                <p className="text-xs text-center text-blue-700 dark:text-blue-400 leading-relaxed">
+                <p className="text-xs text-center text-[var(--text-secondary)] leading-relaxed">
                   Enable Shield Proof above to use private ZCash shield swaps, or click "Get Quote" for a regular ZCash swap
                 </p>
               </motion.div>
@@ -1019,37 +1077,37 @@ export default function Swap() {
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="p-6 bg-blue-50 dark:bg-blue-950 rounded-2xl space-y-4 text-[var(--text-primary)] border-2 border-blue-300 dark:border-blue-700 transition-colors"
+                className="p-6 bg-[var(--bg-tertiary)] rounded-2xl space-y-4 text-[var(--text-primary)] border-2 border-hyper-green/30 transition-colors"
               >
-                <div className="flex items-center justify-between pb-4 border-b border-blue-300 dark:border-blue-700">
-                  <span className="text-sm font-bold text-blue-900 dark:text-blue-400 uppercase tracking-wide flex items-center gap-2">
-                    <Shield size={18} />
+                <div className="flex items-center justify-between pb-4 border-b border-[var(--border-primary)]">
+                  <span className="text-sm font-bold text-[var(--text-primary)] uppercase tracking-wide flex items-center gap-2">
+                    <Shield size={18} className="text-hyper-green" />
                     Shield Swap Quote
                   </span>
-                  <div className="px-4 py-2 bg-blue-600 text-white rounded-xl font-bold text-sm flex items-center gap-2 shadow-lg">
+                  <div className="px-4 py-2 bg-hyper-green text-black rounded-xl font-bold text-sm flex items-center gap-2 shadow-lg">
                     <Shield size={16} />
                     {shieldQuote.fromType === "transparent" ? "T → Z" : "Z → T"}
                   </div>
                 </div>
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between py-2 bg-blue-100 dark:bg-blue-900 rounded-lg px-3">
-                    <span className="text-sm font-bold text-blue-900 dark:text-blue-300">Input Amount</span>
-                    <span className="font-bold text-lg text-blue-900 dark:text-blue-100">{amount} ZEC</span>
+                  <div className="flex items-center justify-between py-2 bg-[var(--bg-secondary)] rounded-lg px-3">
+                    <span className="text-sm font-bold text-[var(--text-primary)]">Input Amount</span>
+                    <span className="font-bold text-lg text-[var(--text-primary)]">{amount} ZEC</span>
                   </div>
                   <div className="flex items-center justify-between py-2">
-                    <span className="text-sm font-bold text-blue-800 dark:text-blue-400">Shield Fee (0.1%)</span>
-                    <span className="font-bold text-lg text-blue-900 dark:text-blue-300">-{shieldQuote.fee} ZEC</span>
+                    <span className="text-sm font-bold text-[var(--text-secondary)]">Shield Fee (0.1%)</span>
+                    <span className="font-bold text-lg text-[var(--text-primary)]">-{shieldQuote.fee} ZEC</span>
                   </div>
-                  <div className="flex items-center justify-between py-3 pt-3 border-t-2 border-blue-300 dark:border-blue-700">
-                    <span className="text-sm font-bold text-blue-900 dark:text-blue-300 uppercase tracking-wide">Net Amount (After Fee)</span>
-                    <span className="font-bold text-xl text-blue-900 dark:text-blue-100">{shieldQuote.amount} ZEC</span>
+                  <div className="flex items-center justify-between py-3 pt-3 border-t-2 border-[var(--border-primary)]">
+                    <span className="text-sm font-bold text-[var(--text-primary)] uppercase tracking-wide">Net Amount (After Fee)</span>
+                    <span className="font-bold text-xl text-[var(--text-primary)]">{shieldQuote.amount} ZEC</span>
                   </div>
                 </div>
-                <div className="pt-4 border-t border-blue-300 dark:border-blue-700 bg-blue-100 dark:bg-blue-900 rounded-lg p-3">
+                <div className="pt-4 border-t border-[var(--border-primary)] bg-[var(--bg-secondary)] rounded-lg p-3">
                   <div className="flex items-start gap-2">
-                    <Shield size={16} className="text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
-                    <div className="text-xs text-blue-700 dark:text-blue-300 leading-relaxed">
-                      <p className="font-medium text-blue-900 dark:text-blue-200 mb-1">
+                    <Shield size={16} className="text-hyper-green mt-0.5 flex-shrink-0" />
+                    <div className="text-xs text-[var(--text-secondary)] leading-relaxed">
+                      <p className="font-medium text-[var(--text-primary)] mb-1">
                         Your funds will be {shieldQuote.toType === "shielded" ? "shielded" : "unshielded"}
                       </p>
                       <p>

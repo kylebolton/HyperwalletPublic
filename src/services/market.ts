@@ -29,8 +29,36 @@ export class MarketService {
         'ETH': 'ethereum',
         'SOL': 'solana',
         'XMR': 'monero',
+        'ZEC': 'zcash',
         'USDT': 'tether',
-        'USDC': 'usd-coin'
+        'USDC': 'usd-coin',
+        'DAI': 'dai',
+        'WBTC': 'wrapped-bitcoin',
+        'WETH': 'weth',
+        'UNI': 'uniswap',
+        'LINK': 'chainlink',
+        'AAVE': 'aave',
+        'WHYPE': 'hyperliquid' // Use HYPE price for wHYPE
+    };
+
+    // Fallback prices when API fails (reasonable market prices)
+    private static FALLBACK_PRICES: Record<string, number> = {
+        'HYPE': 10.0,
+        'HYPEREVM': 10.0,
+        'BTC': 60000,
+        'ETH': 3000,
+        'SOL': 150,
+        'XMR': 150,
+        'ZEC': 50,
+        'USDT': 1.0,
+        'USDC': 1.0,
+        'DAI': 1.0,
+        'WBTC': 60000,
+        'WETH': 3000,
+        'UNI': 10.0,
+        'LINK': 15.0,
+        'AAVE': 100.0,
+        'WHYPE': 10.0
     };
 
     static async getPrices(symbols: string[]): Promise<Record<string, MarketData>> {
@@ -59,22 +87,42 @@ export class MarketService {
                     res.data.forEach((coin: any) => {
                         const symbol = Object.keys(this.COIN_MAP).find(key => this.COIN_MAP[key] === coin.id);
                         if (symbol) {
-                            data[symbol] = {
-                                current_price: coin.current_price || 0,
-                                price_change_percentage_24h: coin.price_change_percentage_24h || 0,
-                                sparkline_in_7d: coin.sparkline_in_7d
-                            };
+                            const price = coin.current_price;
+                            // Validate price is a valid number
+                            if (price !== null && price !== undefined && !isNaN(price) && price > 0) {
+                                data[symbol] = {
+                                    current_price: price,
+                                    price_change_percentage_24h: coin.price_change_percentage_24h || 0,
+                                    sparkline_in_7d: coin.sparkline_in_7d
+                                };
+                            } else {
+                                console.warn(`Invalid price for ${symbol}: ${price}, using fallback`);
+                            }
                         }
                     });
                 }
                 
-                // Fallback prices if API doesn't return data
-                if (symbols.includes('HYPE') && !data['HYPE']) {
-                    data['HYPE'] = { current_price: 10.0, price_change_percentage_24h: 5.0 };
-                }
-                if (symbols.includes('HYPEREVM') && !data['HYPEREVM']) {
-                    data['HYPEREVM'] = data['HYPE'] || { current_price: 10.0, price_change_percentage_24h: 5.0 };
-                }
+                // Ensure all requested symbols have prices (use fallback if missing)
+                symbols.forEach(sym => {
+                    if (!data[sym]) {
+                        const fallbackPrice = this.FALLBACK_PRICES[sym] || this.FALLBACK_PRICES[sym.toUpperCase()];
+                        if (fallbackPrice !== undefined) {
+                            data[sym] = {
+                                current_price: fallbackPrice,
+                                price_change_percentage_24h: 0
+                            };
+                            console.log(`Using fallback price for ${sym}: ${fallbackPrice}`);
+                        } else {
+                            // Last resort: use a reasonable default (1.0 for stablecoins, 10.0 for others)
+                            const defaultPrice = ['USDT', 'USDC', 'DAI'].includes(sym.toUpperCase()) ? 1.0 : 10.0;
+                            data[sym] = {
+                                current_price: defaultPrice,
+                                price_change_percentage_24h: 0
+                            };
+                            console.warn(`No fallback price for ${sym}, using default: ${defaultPrice}`);
+                        }
+                    }
+                });
 
                 return data;
             } catch (error) {
@@ -86,15 +134,29 @@ export class MarketService {
             }
         }).catch((error) => {
             console.error("Market fetch failed after retries", error);
-            // Return fallback data instead of empty object
+            // Return fallback data with reasonable prices (never zero)
             const fallback: Record<string, MarketData> = {};
             symbols.forEach(sym => {
-                if (sym === 'BTC') fallback[sym] = { current_price: 60000, price_change_percentage_24h: 0 };
-                else if (sym === 'ETH') fallback[sym] = { current_price: 3000, price_change_percentage_24h: 0 };
-                else if (sym === 'SOL') fallback[sym] = { current_price: 150, price_change_percentage_24h: 0 };
-                else if (sym === 'XMR') fallback[sym] = { current_price: 150, price_change_percentage_24h: 0 };
-                else fallback[sym] = { current_price: 0, price_change_percentage_24h: 0 };
+                const upperSym = sym.toUpperCase();
+                const fallbackPrice = this.FALLBACK_PRICES[upperSym] || this.FALLBACK_PRICES[sym];
+                
+                if (fallbackPrice !== undefined) {
+                    fallback[sym] = {
+                        current_price: fallbackPrice,
+                        price_change_percentage_24h: 0
+                    };
+                } else {
+                    // Last resort: use reasonable defaults (never zero)
+                    // Stablecoins get 1.0, others get 10.0
+                    const defaultPrice = ['USDT', 'USDC', 'DAI'].includes(upperSym) ? 1.0 : 10.0;
+                    fallback[sym] = {
+                        current_price: defaultPrice,
+                        price_change_percentage_24h: 0
+                    };
+                    console.warn(`No fallback price configured for ${sym}, using default: ${defaultPrice}`);
+                }
             });
+            console.log(`Using fallback prices for all symbols:`, fallback);
             return fallback;
         });
     }

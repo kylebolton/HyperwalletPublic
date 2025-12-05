@@ -1,3 +1,7 @@
+// CRITICAL: Load process polyfill FIRST before any other imports
+// This must be imported before any modules that use process
+import './polyfills/process';
+
 import { Buffer } from 'buffer';
 globalThis.Buffer = Buffer;
 

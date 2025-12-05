@@ -1,6 +1,7 @@
 import { Connection, Keypair, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import * as bip39 from 'bip39';
 import { type IChainService } from './types';
+import { AddressCacheService } from '../addressCache';
 
 // Retry helper
 async function retry<T>(fn: () => Promise<T>, retries = 2, delay = 1000): Promise<T> {
@@ -18,10 +19,15 @@ export class SOLChainService implements IChainService {
     symbol = "SOL";
     private connections: Connection[];
     private keypair: Keypair;
-
     private keypairPromise: Promise<Keypair>;
+    private walletId: string | null = null;
+    private derivationIndex: number = 0;
+    private mnemonic: string;
 
-    constructor(mnemonic: string, rpcUrl?: string) {
+    constructor(mnemonic: string, rpcUrl?: string, walletId?: string, derivationIndex: number = 0) {
+        this.mnemonic = mnemonic;
+        this.walletId = walletId || null;
+        this.derivationIndex = derivationIndex;
         // Reliable Solana RPC endpoints (public and free tier)
         // Using endpoints that don't require API keys and have better rate limits
         const rpcUrls = rpcUrl 
@@ -66,7 +72,9 @@ export class SOLChainService implements IChainService {
                 throw new Error("Invalid seed generated from mnemonic");
             }
             
-            const derived = derivePath("m/44'/501'/0'/0'", seedHex);
+            // Use derivation index in the path
+            const derivationPath = `m/44'/501'/${this.derivationIndex}'/0'`;
+            const derived = derivePath(derivationPath, seedHex);
             
             if (!derived || !derived.key) {
                 throw new Error("Failed to derive key from path");
@@ -89,6 +97,18 @@ export class SOLChainService implements IChainService {
             
             const keypair = Keypair.fromSeed(seedBytes);
             this.keypair = keypair; // Update the instance keypair
+            
+            // Cache the address if walletId is provided
+            if (this.walletId && keypair.publicKey) {
+                const address = keypair.publicKey.toBase58();
+                AddressCacheService.setCachedAddress(
+                    this.walletId,
+                    this.symbol,
+                    address,
+                    this.derivationIndex
+                );
+            }
+            
             return keypair;
         } catch (error: any) {
             console.error("Failed to derive Solana keypair:", error);
@@ -124,8 +144,31 @@ export class SOLChainService implements IChainService {
     }
 
     async getAddress(): Promise<string> {
+        // Check cache first if walletId is available
+        if (this.walletId) {
+            const cached = AddressCacheService.getCachedAddress(
+                this.walletId,
+                this.symbol,
+                this.derivationIndex
+            );
+            if (cached) {
+                return cached;
+            }
+        }
+        
         const keypair = await this.ensureKeypair();
         const address = keypair.publicKey.toBase58();
+        
+        // Cache the address if walletId is provided
+        if (this.walletId && address) {
+            AddressCacheService.setCachedAddress(
+                this.walletId,
+                this.symbol,
+                address,
+                this.derivationIndex
+            );
+        }
+        
         // Validate address format (non-blocking - warn but still return)
         if (!this.validateAddress(address)) {
             console.warn(`SOL address validation failed for: ${address}, but returning anyway`);

@@ -19,10 +19,13 @@ export class SwapService {
   private static PLATFORM_FEE_PERCENT = 0.01;
 
   // Platform revenue address - all fees go here
+  // SwapZone: Revenue is automatically routed via API key to this address
+  // HyperSwap: This address is used as the builder code for fee collection
   private static PLATFORM_REVENUE_ADDRESS =
     "0x0e7FCDC85f296004Bc235cc86cfA69da2c39324a";
 
   // Platform API key - hardcoded for platform use
+  // This API key routes SwapZone swap revenue to PLATFORM_REVENUE_ADDRESS
   private static PLATFORM_API_KEY = "f_plk-ONA";
 
   // Swapzone API base URL
@@ -47,11 +50,20 @@ export class SwapService {
 
   /**
    * Get swap quote - routes to HyperSwap for HyperEVM token swaps, SwapZone for cross-chain swaps
+   * @param from - Token symbol to swap from
+   * @param to - Token symbol to swap to
+   * @param amount - Amount to swap
+   * @param walletAddress - Optional wallet address for token discovery
+   * @param fromTokenAddress - Optional token address (if provided, will be used for HyperSwap)
+   * @param toTokenAddress - Optional token address (if provided, will be used for HyperSwap)
    */
   static async getQuote(
     from: string,
     to: string,
-    amount: string
+    amount: string,
+    walletAddress?: string,
+    fromTokenAddress?: string,
+    toTokenAddress?: string
   ): Promise<SwapQuote> {
     // Check if this is a HyperEVM token swap (both from and to are HyperEVM tokens)
     const isHyperEVMSwap =
@@ -63,7 +75,10 @@ export class SwapService {
         const hyperSwapQuote = await HyperSwapService.getQuote(
           from,
           to,
-          amount
+          amount,
+          walletAddress,
+          fromTokenAddress,
+          toTokenAddress
         );
         return {
           fromCurrency: hyperSwapQuote.fromCurrency,
@@ -76,6 +91,15 @@ export class SwapService {
           provider: "hyperswap",
         };
       } catch (error: any) {
+        console.error("HyperSwap quote failed:", {
+          error: error.message,
+          stack: error.stack,
+          from,
+          to,
+          amount,
+          fromTokenAddress,
+          toTokenAddress,
+        });
         console.warn(
           "HyperSwap quote failed, falling back to market rates:",
           error.message
@@ -85,17 +109,18 @@ export class SwapService {
     }
 
     // Use SwapZone for all non-HyperEVM swaps
+    // Map our symbols to Swapzone format (outside try block for error handling)
+    const fromSymbol = this.mapToSwapzoneSymbol(from);
+    const toSymbol = this.mapToSwapzoneSymbol(to);
+
+    if (!fromSymbol || !toSymbol) {
+      // Fallback to market-based calculation if symbols not supported
+      return this.getMarketBasedQuote(from, to, amount, "swapzone");
+    }
+
     try {
-      // Map our symbols to Swapzone format
-      const fromSymbol = this.mapToSwapzoneSymbol(from);
-      const toSymbol = this.mapToSwapzoneSymbol(to);
-
-      if (!fromSymbol || !toSymbol) {
-        // Fallback to market-based calculation if symbols not supported
-        return this.getMarketBasedQuote(from, to, amount, "swapzone");
-      }
-
       // Get quote from Swapzone API (using platform API key for revenue)
+      // The API key routes swap revenue to PLATFORM_REVENUE_ADDRESS automatically
       const response = await axios.get(
         `${this.SWAPZONE_API}/exchange/get-amount`,
         {
@@ -103,16 +128,60 @@ export class SwapService {
             from: fromSymbol,
             to: toSymbol,
             amount: amount,
-            apiKey: this.getPlatformApiKey(), // Platform API key - always used
+            apiKey: this.getPlatformApiKey(), // Platform API key - revenue automatically routed to PLATFORM_REVENUE_ADDRESS
           },
           timeout: 10000,
         }
       );
 
+      // Log full response for debugging
+      console.log("SwapZone API response:", JSON.stringify(response.data, null, 2));
+
       const swapzoneQuote = response.data;
-      const amountOutFromPartner = parseFloat(
-        swapzoneQuote.toAmount || swapzoneQuote.estimatedAmount || "0"
-      );
+      
+      // Comprehensive response parsing - check multiple possible fields
+      let amountOutFromPartner: number | null = null;
+      
+      // Try different possible response formats
+      if (swapzoneQuote) {
+        // Direct amount fields
+        if (swapzoneQuote.toAmount !== undefined && swapzoneQuote.toAmount !== null) {
+          amountOutFromPartner = parseFloat(String(swapzoneQuote.toAmount));
+        } else if (swapzoneQuote.estimatedAmount !== undefined && swapzoneQuote.estimatedAmount !== null) {
+          amountOutFromPartner = parseFloat(String(swapzoneQuote.estimatedAmount));
+        } else if (swapzoneQuote.amount !== undefined && swapzoneQuote.amount !== null) {
+          amountOutFromPartner = parseFloat(String(swapzoneQuote.amount));
+        }
+        // Nested data fields
+        else if (swapzoneQuote.data?.toAmount !== undefined && swapzoneQuote.data?.toAmount !== null) {
+          amountOutFromPartner = parseFloat(String(swapzoneQuote.data.toAmount));
+        } else if (swapzoneQuote.data?.estimatedAmount !== undefined && swapzoneQuote.data?.estimatedAmount !== null) {
+          amountOutFromPartner = parseFloat(String(swapzoneQuote.data.estimatedAmount));
+        } else if (swapzoneQuote.data?.amount !== undefined && swapzoneQuote.data?.amount !== null) {
+          amountOutFromPartner = parseFloat(String(swapzoneQuote.data.amount));
+        }
+        // Result field
+        else if (swapzoneQuote.result?.toAmount !== undefined && swapzoneQuote.result?.toAmount !== null) {
+          amountOutFromPartner = parseFloat(String(swapzoneQuote.result.toAmount));
+        } else if (swapzoneQuote.result?.estimatedAmount !== undefined && swapzoneQuote.result?.estimatedAmount !== null) {
+          amountOutFromPartner = parseFloat(String(swapzoneQuote.result.estimatedAmount));
+        }
+      }
+
+      // Validate the parsed amount
+      if (amountOutFromPartner === null || isNaN(amountOutFromPartner) || amountOutFromPartner <= 0) {
+        console.error("SwapZone API: Invalid or missing amount in response", {
+          response: swapzoneQuote,
+          from: fromSymbol,
+          to: toSymbol,
+          amount: amount,
+        });
+        throw new Error(
+          `SwapZone API returned invalid response: ${JSON.stringify(swapzoneQuote)}`
+        );
+      }
+
+      console.log(`SwapZone quote: ${amount} ${fromSymbol} → ${amountOutFromPartner} ${toSymbol}`);
 
       // Calculate platform fee (1% of input - goes to platform owner)
       const amountNum = parseFloat(amount);
@@ -134,6 +203,14 @@ export class SwapService {
         provider: "swapzone",
       };
     } catch (error: any) {
+      console.error("SwapZone API failed:", {
+        error: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        from: fromSymbol,
+        to: toSymbol,
+        amount: amount,
+      });
       console.warn(
         "Swapzone API failed, falling back to market rates:",
         error.message
@@ -153,19 +230,33 @@ export class SwapService {
     provider: "swapzone" | "hyperswap" = "swapzone"
   ): Promise<SwapQuote> {
     try {
+      console.log(`Getting market-based quote for ${from} → ${to}, amount: ${amount}`);
       const prices = await MarketService.getPrices([from, to]);
       const fromPrice = prices[from]?.current_price || 0;
       const toPrice = prices[to]?.current_price || 1;
 
-      if (!fromPrice) {
-        throw new Error(`Price for ${from} not found`);
+      console.log(`Market prices: ${from} = $${fromPrice}, ${to} = $${toPrice}`);
+
+      if (!fromPrice || fromPrice <= 0) {
+        throw new Error(`Price for ${from} not found or invalid: ${fromPrice}`);
       }
 
-      const rate = fromPrice / toPrice;
+      if (!toPrice || toPrice <= 0) {
+        console.warn(`Invalid price for ${to}: ${toPrice}, using 1.0 as fallback`);
+      }
+
+      const rate = fromPrice / (toPrice || 1);
       const amountNum = parseFloat(amount);
+      
+      if (isNaN(amountNum) || amountNum <= 0) {
+        throw new Error(`Invalid amount: ${amount}`);
+      }
+
       const platformFee = amountNum * this.PLATFORM_FEE_PERCENT;
       const amountAfterFee = amountNum - platformFee;
       const amountOut = amountAfterFee * rate;
+
+      console.log(`Market quote calculated: ${amount} ${from} → ${amountOut.toFixed(6)} ${to} (rate: ${rate.toFixed(6)})`);
 
       return {
         fromCurrency: from,
@@ -176,11 +267,21 @@ export class SwapService {
         fee: platformFee.toFixed(6) + " " + from,
         provider: provider,
       };
-    } catch (error) {
+    } catch (error: any) {
+      console.error("Market-based quote failed:", {
+        error: error.message,
+        from,
+        to,
+        amount,
+        provider,
+      });
       // Final fallback: simple calculation without market data
       const amountNum = parseFloat(amount);
+      if (isNaN(amountNum) || amountNum <= 0) {
+        throw new Error(`Invalid amount for fallback calculation: ${amount}`);
+      }
       const platformFee = amountNum * this.PLATFORM_FEE_PERCENT;
-      return {
+      const fallbackQuote = {
         fromCurrency: from,
         toCurrency: to,
         amountIn: amount,
@@ -189,6 +290,8 @@ export class SwapService {
         fee: platformFee.toFixed(6) + " " + from,
         provider: provider,
       };
+      console.warn("Using final fallback quote (1:1 rate):", fallbackQuote);
+      return fallbackQuote;
     }
   }
 
@@ -253,7 +356,7 @@ export class SwapService {
       }
 
       // Create swap transaction via Swapzone API
-      // Revenue share goes to platform via hardcoded API key
+      // Revenue share goes to platform via hardcoded API key (routes to PLATFORM_REVENUE_ADDRESS)
       const response = await axios.post(
         `${this.SWAPZONE_API}/exchange/create-exchange`,
         {
@@ -262,7 +365,7 @@ export class SwapService {
           address: destinationAddress,
           amount: quote.amountIn,
           flow: "standard",
-          apiKey: this.getPlatformApiKey(), // Platform API key - always used
+          apiKey: this.getPlatformApiKey(), // Platform API key - revenue automatically routed to PLATFORM_REVENUE_ADDRESS
         },
         {
           timeout: 15000,
@@ -272,12 +375,55 @@ export class SwapService {
         }
       );
 
+      // Log full response for debugging
+      console.log("SwapZone create-exchange response:", JSON.stringify(response.data, null, 2));
+
       const swapData = response.data;
 
+      // Comprehensive parsing for deposit address - check multiple possible fields
+      let depositAddr: string | undefined;
+      
+      if (swapData) {
+        // Direct fields
+        if (swapData.depositAddress) {
+          depositAddr = String(swapData.depositAddress);
+        } else if (swapData.payinAddress) {
+          depositAddr = String(swapData.payinAddress);
+        } else if (swapData.address) {
+          depositAddr = String(swapData.address);
+        } else if (swapData.deposit) {
+          depositAddr = String(swapData.deposit);
+        }
+        // Nested fields
+        else if (swapData.data?.depositAddress) {
+          depositAddr = String(swapData.data.depositAddress);
+        } else if (swapData.data?.payinAddress) {
+          depositAddr = String(swapData.data.payinAddress);
+        } else if (swapData.data?.address) {
+          depositAddr = String(swapData.data.address);
+        }
+        // Result fields
+        else if (swapData.result?.depositAddress) {
+          depositAddr = String(swapData.result.depositAddress);
+        } else if (swapData.result?.payinAddress) {
+          depositAddr = String(swapData.result.payinAddress);
+        }
+      }
+
+      // Get swap ID
+      const swapId = swapData.id || swapData.exchangeId || swapData.transactionId || `swap_${Date.now()}`;
+
+      // If no deposit address found, use destination address as fallback
+      if (!depositAddr) {
+        console.warn("SwapZone API did not return deposit address, using destination address as fallback");
+        depositAddr = destinationAddress;
+      }
+
+      console.log(`SwapZone swap created: ID=${swapId}, DepositAddress=${depositAddr}`);
+
       return {
-        id: swapData.id || swapData.exchangeId || `swap_${Date.now()}`,
-        depositAddress:
-          swapData.depositAddress || swapData.payinAddress || swapData.address,
+        id: swapId,
+        depositAddress: depositAddr,
       };
     } catch (error: any) {
       console.error("Failed to create swap via Swapzone:", error.message);

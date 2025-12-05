@@ -13,7 +13,7 @@ interface PreviewModeContextType {
 const PreviewModeContext = createContext<PreviewModeContextType | undefined>(undefined);
 
 export function PreviewModeProvider({ children }: { children: ReactNode }) {
-  // Preview mode disabled for production - always false
+  // Preview mode disabled - always false
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   const navigate = useNavigate();
   const isPreviewModeRef = useRef(isPreviewMode);
@@ -24,7 +24,7 @@ export function PreviewModeProvider({ children }: { children: ReactNode }) {
   }, [isPreviewMode]);
 
   const activatePreviewMode = () => {
-    // Preview mode disabled for production
+    // Preview mode disabled
     return;
   };
 
@@ -33,11 +33,9 @@ export function PreviewModeProvider({ children }: { children: ReactNode }) {
   };
 
   const togglePreviewMode = () => {
-    // Preview mode disabled for production - no-op
+    // Preview mode disabled - no-op
     return;
   };
-
-  // Keyboard shortcut removed for production
 
   return (
     <PreviewModeContext.Provider

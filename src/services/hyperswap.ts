@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { MarketService } from "./market";
+import { TokenService, type TokenInfo } from "./tokens";
 
 export interface HyperSwapQuote {
   fromCurrency: string;
@@ -27,6 +28,8 @@ export class HyperSwapService {
     "0x0000000000000000000000000000000000000000"; // Placeholder - needs actual address
 
   // Builder code for 1% fee collection
+  // NOTE: This is the platform revenue address that should receive builder fees
+  // The builder code mechanism needs to be implemented in executeSwap() to actually collect fees
   private static readonly BUILDER_CODE =
     "0x0e7FCDC85f296004Bc235cc86cfA69da2c39324a"; // Platform revenue address as builder code
 
@@ -56,20 +59,39 @@ export class HyperSwapService {
 
   /**
    * Get swap quote from HyperSwap
+   * @param fromToken - Token symbol to swap from
+   * @param toToken - Token symbol to swap to
+   * @param amountIn - Amount to swap
+   * @param walletAddress - Optional wallet address for token discovery
+   * @param fromTokenAddress - Optional token address (if provided, will be used instead of lookup)
+   * @param toTokenAddress - Optional token address (if provided, will be used instead of lookup)
    */
   static async getQuote(
     fromToken: string,
     toToken: string,
     amountIn: string,
-    walletAddress?: string
+    walletAddress?: string,
+    fromTokenAddress?: string,
+    toTokenAddress?: string
   ): Promise<HyperSwapQuote> {
     try {
-      // For now, use native HYPE token (ETH-compatible) and common tokens
-      // In production, you'd need actual token addresses
-      const fromTokenAddress = this.getTokenAddress(fromToken);
-      const toTokenAddress = this.getTokenAddress(toToken);
+      // Get token addresses - use provided addresses first, then try to look them up
+      let fromAddr = fromTokenAddress;
+      let toAddr = toTokenAddress;
 
-      if (!fromTokenAddress || !toTokenAddress) {
+      if (!fromAddr) {
+        fromAddr = await this.getTokenAddress(fromToken, walletAddress);
+      }
+      if (!toAddr) {
+        toAddr = await this.getTokenAddress(toToken, walletAddress);
+      }
+
+      console.log(`HyperSwap quote request: ${fromToken} (${fromAddr}) → ${toToken} (${toAddr})`);
+
+      if (!fromAddr || !toAddr) {
+        console.warn(
+          `HyperSwap: Token addresses not found for ${fromToken} (${fromAddr}) or ${toToken} (${toAddr}), using market quote`
+        );
         // Fallback to market-based quote if tokens not found
         return await this.getMarketBasedQuote(fromToken, toToken, amountIn);
       }
@@ -84,13 +106,17 @@ export class HyperSwapService {
       // Try to get quote from router
       // Note: This is a placeholder - actual implementation depends on HyperSwap contract structure
       try {
-        const amountInWei = ethers.parseUnits(amountIn, 18); // Assuming 18 decimals
-        const path = [fromTokenAddress, toTokenAddress];
+        // Get token decimals for proper amount calculation
+        const fromDecimals = await this.getTokenDecimals(fromAddr, provider);
+        const toDecimals = await this.getTokenDecimals(toAddr, provider);
+        
+        const amountInWei = ethers.parseUnits(amountIn, fromDecimals);
+        const path = [fromAddr, toAddr];
 
         // Get quote (this will fail if router address is placeholder)
         const amounts = await router.getAmountsOut(amountInWei, path);
         const amountOutWei = amounts[amounts.length - 1];
-        const amountOut = ethers.formatUnits(amountOutWei, 18);
+        const amountOut = ethers.formatUnits(amountOutWei, toDecimals);
 
         // Calculate builder fee (1% of output)
         const amountOutNum = parseFloat(amountOut);
@@ -109,16 +135,16 @@ export class HyperSwapService {
           builderFee: builderFee.toFixed(6),
           path: path,
         };
-      } catch (contractError) {
+      } catch (contractError: any) {
         // If contract call fails, fall back to market-based quote
         console.warn(
           "HyperSwap contract call failed, using market quote:",
-          contractError
+          contractError?.message || contractError
         );
         return await this.getMarketBasedQuote(fromToken, toToken, amountIn);
       }
     } catch (error: any) {
-      console.error("HyperSwap quote error:", error);
+      console.error("HyperSwap quote error:", error?.message || error);
       return await this.getMarketBasedQuote(fromToken, toToken, amountIn);
     }
   }
@@ -140,11 +166,20 @@ export class HyperSwapService {
         signer
       );
 
-      const fromTokenAddress = this.getTokenAddress(quote.fromCurrency);
-      const toTokenAddress = this.getTokenAddress(quote.toCurrency);
+      // Try to get token addresses from quote path if available
+      let fromTokenAddress = quote.path?.[0];
+      let toTokenAddress = quote.path?.[quote.path.length - 1];
+      
+      // Fallback to lookup if not in path
+      if (!fromTokenAddress) {
+        fromTokenAddress = await this.getTokenAddress(quote.fromCurrency, await signer.getAddress());
+      }
+      if (!toTokenAddress) {
+        toTokenAddress = await this.getTokenAddress(quote.toCurrency, await signer.getAddress());
+      }
 
       if (!fromTokenAddress || !toTokenAddress) {
-        throw new Error("Token addresses not found");
+        throw new Error(`Token addresses not found: ${quote.fromCurrency} (${fromTokenAddress}) or ${quote.toCurrency} (${toTokenAddress})`);
       }
 
       const amountInWei = ethers.parseUnits(quote.amountIn, 18);
@@ -176,8 +211,10 @@ export class HyperSwapService {
       }
 
       // Execute swap with builder code
-      // Note: Builder code is typically passed as a parameter or encoded in the transaction
-      // This is a placeholder - actual implementation depends on HyperSwap's builder code mechanism
+      // TODO: Implement builder code parameter to route 1% builder fee to BUILDER_CODE address
+      // Currently, builder code is not passed to the router contract - fees may not be collected
+      // Builder code mechanism depends on HyperSwap's contract implementation
+      // The builder fee (1%) should be automatically routed to BUILDER_CODE during swap execution
       const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 minutes
 
       let tx;
@@ -222,10 +259,35 @@ export class HyperSwapService {
 
   /**
    * Get token address for a symbol
-   * In production, this should use a token registry or configuration
+   * First checks if it's a native token (HYPE), then tries to get from TokenService,
+   * finally falls back to placeholder map
    */
-  private static getTokenAddress(symbol: string): string | null {
-    // Placeholder token addresses - these need to be updated with actual HyperEVM token addresses
+  private static async getTokenAddress(
+    symbol: string,
+    walletAddress?: string
+  ): Promise<string | null> {
+    const upperSymbol = symbol.toUpperCase();
+
+    // Native token (HYPE) is always ZeroAddress
+    if (upperSymbol === "HYPE" || upperSymbol === "ETH") {
+      return ethers.ZeroAddress;
+    }
+
+    // Try to get from TokenService if wallet address is provided
+    if (walletAddress) {
+      try {
+        const tokens = await TokenService.getHyperEVMTokens(walletAddress, true);
+        const token = tokens.find((t) => t.symbol.toUpperCase() === upperSymbol);
+        if (token && token.address !== "0x0000000000000000000000000000000000000000") {
+          console.log(`Found token address for ${symbol}: ${token.address}`);
+          return token.address;
+        }
+      } catch (error) {
+        console.warn(`Failed to get token address from TokenService for ${symbol}:`, error);
+      }
+    }
+
+    // Fallback to placeholder map (last resort)
     const tokenMap: Record<string, string> = {
       HYPE: ethers.ZeroAddress, // Native token
       ETH: ethers.ZeroAddress, // Native token
@@ -233,7 +295,38 @@ export class HyperSwapService {
       USDC: "0x0000000000000000000000000000000000000000", // Placeholder
     };
 
-    return tokenMap[symbol.toUpperCase()] || null;
+    const address = tokenMap[upperSymbol];
+    if (address && address !== "0x0000000000000000000000000000000000000000") {
+      return address;
+    }
+
+    return null;
+  }
+
+  /**
+   * Get token decimals from on-chain contract
+   */
+  private static async getTokenDecimals(
+    tokenAddress: string,
+    provider: ethers.JsonRpcProvider
+  ): Promise<number> {
+    // Native token has 18 decimals
+    if (tokenAddress === ethers.ZeroAddress) {
+      return 18;
+    }
+
+    try {
+      const tokenContract = new ethers.Contract(
+        tokenAddress,
+        this.ERC20_ABI,
+        provider
+      );
+      const decimals = await tokenContract.decimals();
+      return Number(decimals);
+    } catch (error) {
+      console.warn(`Failed to get decimals for token ${tokenAddress}, defaulting to 18`);
+      return 18; // Default to 18 decimals
+    }
   }
 
   /**
@@ -271,9 +364,13 @@ export class HyperSwapService {
         builderFee: builderFee.toFixed(6),
         path: [],
       };
-    } catch (error) {
-      // Final fallback
+      } catch (error: any) {
+      console.error(`Market-based quote failed for ${fromToken} → ${toToken}:`, error?.message || error);
+      // Final fallback - use 1:1 rate with builder fee
       const amountNum = parseFloat(amountIn);
+      if (isNaN(amountNum) || amountNum <= 0) {
+        throw new Error(`Invalid amount: ${amountIn}`);
+      }
       const builderFee = amountNum * this.BUILDER_FEE_PERCENT;
       return {
         fromCurrency: fromToken,

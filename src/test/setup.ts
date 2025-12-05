@@ -5,26 +5,30 @@ globalThis.Buffer = Buffer;
 import '@testing-library/jest-dom';
 import { vi } from 'vitest';
 
-// Mock Monero WASM
+// Mock Monero WASM (monero-ts) to avoid loading heavy WASM in tests
 vi.mock('monero-ts', async () => {
-  const actual = await vi.importActual('monero-ts');
   return {
-      ...actual,
-      default: {
-          ...(actual as any).default,
-          createWalletFull: vi.fn().mockResolvedValue({
-              getAddress: vi.fn().mockResolvedValue('4AdUndXHHZ6cfufTMvppY6JwXNouMBzSkbLYfpAV5Usx3skHNfzQYFYgQp8YwF2Y1nCvZzq6vDWc1vR65wXwscv5Y2CK3y1J2x6qFzT'.padEnd(95, 'A')),
-              getBalance: vi.fn().mockResolvedValue(0),
-              startSyncing: vi.fn(),
-          }),
-          MoneroNetworkType: { MAINNET: 'mainnet' }
-      },
-      createWalletFull: vi.fn().mockResolvedValue({
-          getAddress: vi.fn().mockResolvedValue('4AdUndXHHZ6cfufTMvppY6JwXNouMBzSkbLYfpAV5Usx3skHNfzQYFYgQp8YwF2Y1nCvZzq6vDWc1vR65wXwscv5Y2CK3y1J2x6qFzT'.padEnd(95, 'A')),
+    default: {
+      MoneroNetworkType: { MAINNET: 'mainnet' },
+      createWalletKeys: vi.fn().mockResolvedValue({
+        getPrimaryAddress: vi.fn().mockResolvedValue('4'.padEnd(95, 'A')),
+        getBalance: vi.fn().mockResolvedValue(0),
+        startSyncing: vi.fn(),
+      }),
+      MoneroWalletKeys: {
+        createWallet: vi.fn().mockResolvedValue({
+          getPrimaryAddress: vi.fn().mockResolvedValue('4'.padEnd(95, 'A')),
           getBalance: vi.fn().mockResolvedValue(0),
           startSyncing: vi.fn(),
-      }),
-      MoneroNetworkType: { MAINNET: 'mainnet' }
+        }),
+      },
+      LibraryUtils: {
+        setWorkerDistPath: vi.fn(),
+      },
+      MoneroUtils: {
+        setProxyToWorker: vi.fn(),
+      },
+    },
   };
 });
 

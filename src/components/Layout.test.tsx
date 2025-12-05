@@ -50,7 +50,6 @@ describe('Layout Component', () => {
     renderLayout();
 
     expect(screen.getByText('Portfolio')).toBeInTheDocument();
-    expect(screen.getByText('Analytics')).toBeInTheDocument();
     expect(screen.getByText('History')).toBeInTheDocument();
     expect(screen.getByText('Swap')).toBeInTheDocument();
     expect(screen.getByText('Import')).toBeInTheDocument();

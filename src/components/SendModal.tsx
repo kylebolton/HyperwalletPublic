@@ -1,11 +1,8 @@
 import { useState, useEffect } from "react";
 import Modal from "./Modal";
 import { Send, CheckCircle, XCircle, Loader2 } from "lucide-react";
-import { ChainManager } from "../services/chains/manager";
-import { NetworkService } from "../services/networks";
-import { StorageService } from "../services/storage";
-import { WalletService } from "../services/wallet";
 import { SupportedChain } from "../services/chains/manager";
+import { createChainManagerFromActiveWallet } from "../services/chains/factory";
 
 interface SendModalProps {
   isOpen: boolean;
@@ -56,18 +53,7 @@ export default function SendModal({
     setError(null);
 
     try {
-      const mnemonic = StorageService.getMnemonic();
-      const privKey = WalletService.getStoredPrivateKey();
-
-      if (!mnemonic && !privKey) throw new Error("No wallet found");
-
-      const enabledNetworks = NetworkService.getEnabledNetworks();
-      const manager = new ChainManager(
-        privKey || undefined, // EVM secret (prefer private key)
-        !!privKey, // Is private key
-        mnemonic || undefined, // Non-EVM secret (mnemonic)
-        enabledNetworks // Network configurations
-      );
+      const manager = createChainManagerFromActiveWallet();
       const service = manager.getService(chainKey as SupportedChain);
 
       const hash = await service.sendTransaction(to.trim(), amount);
@@ -87,21 +73,7 @@ export default function SendModal({
     const loadBalance = async () => {
       setLoadingBalance(true);
       try {
-        const mnemonic = StorageService.getMnemonic();
-        const privKey = WalletService.getStoredPrivateKey();
-
-        if (!mnemonic && !privKey) {
-          setLoadingBalance(false);
-          return;
-        }
-
-        const enabledNetworks = NetworkService.getEnabledNetworks();
-        const manager = new ChainManager(
-          privKey || undefined,
-          !!privKey,
-          mnemonic || undefined,
-          enabledNetworks
-        );
+        const manager = createChainManagerFromActiveWallet();
         const service = manager.getService(chainKey as SupportedChain);
         const bal = await service.getBalance();
         setBalance(bal);
@@ -129,22 +101,7 @@ export default function SendModal({
       setAddressError(null);
 
       try {
-        const mnemonic = StorageService.getMnemonic();
-        const privKey = WalletService.getStoredPrivateKey();
-
-        if (!mnemonic && !privKey) {
-          setAddressError("No wallet found");
-          setIsValidatingAddress(false);
-          return;
-        }
-
-        const enabledNetworks = NetworkService.getEnabledNetworks();
-        const manager = new ChainManager(
-          privKey || undefined,
-          !!privKey,
-          mnemonic || undefined,
-          enabledNetworks
-        );
+        const manager = createChainManagerFromActiveWallet();
         const service = manager.getService(chainKey as SupportedChain);
         const isValid = service.validateAddress(to.trim());
 
@@ -188,7 +145,7 @@ export default function SendModal({
 
   return (
     <Modal isOpen={isOpen} onClose={reset} title={`Send ${symbol}`}>
-      <div className="space-y-6">
+      <div className="space-y-6 pb-2">
         {txHash ? (
           <div className="text-center space-y-4 py-4">
             <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto text-green-600">

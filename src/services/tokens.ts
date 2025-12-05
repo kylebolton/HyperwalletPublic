@@ -209,7 +209,8 @@ export class TokenService {
       const decimalsNum = Number(decimals);
       const formattedBalance = ethers.formatUnits(balance, decimalsNum);
       
-      // Only return tokens with balance > 0
+      // Return token if it has balance > 0 (discovered tokens should always have balance)
+      // This method is used for discovered tokens from event scanning, so they should have balance
       if (balanceBigInt > 0n) {
         return {
           address: tokenAddress,
@@ -220,6 +221,11 @@ export class TokenService {
           logoURI: registryMetadata?.logoURI,
         };
       }
+      
+      // For discovered tokens, if balance is 0, still return it (might be a timing issue)
+      // But only if it was discovered through event scanning (not common tokens)
+      // Actually, let's be more strict - only return tokens with balance > 0 for discovered tokens
+      // The issue might be that the balance query is failing or returning 0 when it shouldn't
     } catch (e) {
       // Token might not be ERC20 compliant or query failed
       console.warn(`Failed to get info for token ${tokenAddress}:`, e);
